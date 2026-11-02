@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RunHub MY — Malaysia Race Calendar</title>
+<style>
+  :root {
+    --lime: #c8ff00;
+    --accent: #ff4d00;
+    --bg: #0b0e12;
+    --dark: #0c0f12;
+    --card: #161b22;
+    --border: #232b36;
+    --text: #e6edf3;
+    --muted: #8b98a9;
+    --mono: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  a { color: inherit; text-decoration: none; }
+  button { font: inherit; cursor: pointer; border: 0; background: none; color: inherit; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--dark); }
+  ::-webkit-scrollbar-thumb { background: #2a3441; border-radius: 99px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--lime); }
+
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 20px; width: 100%; }
+
+  /* header */
+  header {
+    position: sticky; top: 0; z-index: 40;
+    background: rgba(15, 20, 26, 0.92);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  .bar { height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo {
+    width: 38px; height: 38px; border-radius: 11px; background: var(--lime); color: #000;
+    display: grid; place-items: center; font-weight: 900; transform: rotate(-3deg);
+    box-shadow: 0 0 18px rgba(200, 255, 0, 0.25);
+  }
+  .brand h1 { font-size: 19px; margin: 0; letter-spacing: -0.4px; font-weight: 900; }
+  .brand h1 span { color: var(--lime); }
+  .brand p { margin: 0; font-size: 10px; color: var(--muted); letter-spacing: 0.4px; }
+  .hdr-actions { display: flex; align-items: center; gap: 8px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 12px; font-family: var(--mono);
+    background: #11161d; border: 1px solid var(--border);
+    padding: 7px 12px; border-radius: 99px; color: var(--muted);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 99px; background: #34d399; }
+  .dot.busy { background: var(--accent); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: 0.25; } }
+  .btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 8px 13px; border-radius: 9px; font-size: 13px; font-weight: 700;
+    background: var(--card); border: 1px solid var(--border); color: var(--text);
+    transition: 0.15s;
+  }
+  .btn:hover { border-color: #3d4a5c; }
+  .btn.primary { background: var(--lime); color: #000; border-color: var(--lime); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+  .badge-count {
+    background: var(--accent); color: #fff; font-size: 11px; font-weight: 800;
+    min-width: 18px; padding: 1px 5px; border-radius: 99px; text-align: center;
+  }
+
+  /* hero */
+  .hero {
+    background: linear-gradient(180deg, #131922, var(--dark));
+    border-bottom: 1px solid var(--border); padding: 30px 0;
+  }
+  .kicker {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 11px; font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.8px;
+    background: rgba(200, 255, 0, 0.08); border: 1px solid rgba(200, 255, 0, 0.3);
+    color: var(--lime); padding: 5px 11px; border-radius: 99px; margin-bottom: 12px;
+  }
+  .hero h2 { font-size: clamp(24px, 3.4vw, 36px); margin: 0 0 8px; letter-spacing: -1px; font-weight: 900; line-height: 1.15; }
+  .hero h2 em { font-style: normal; color: var(--lime); }
+  .hero p { margin: 0; color: var(--muted); max-width: 620px; font-size: 14px; }
+  .portals { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; align-items: center; }
+  .portals span:first-child { font-size: 10px; text-transform: uppercase; letter-spacing: 0.7px; color: #5c6a7c; font-weight: 700; }
+  .portals span:not(:first-child) {
+    font-size: 11px; background: #0f141a; border: 1px solid #1d242e;
+    color: #97a5b6; padding: 3px 8px; border-radius: 6px;
+  }
+
+  /* filters */
+  .filters {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 16px; margin: 26px 0 20px; display: grid; gap: 14px;
+  }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .search { position: relative; flex: 1 1 320px; }
+  .search input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    border-radius: 10px; padding: 11px 14px 11px 38px; font-size: 14px; outline: none;
+  }
+  .search input:focus { border-color: var(--lime); }
+  .search svg { position: absolute; left: 12px; top: 12px; color: #5c6a7c; }
+  .seg { display: flex; gap: 3px; background: var(--bg); padding: 3px; border-radius: 10px; border: 1px solid var(--border); }
+  .seg button { padding: 6px 11px; border-radius: 7px; font-size: 12px; font-weight: 700; color: var(--muted); }
+  .seg button.on { background: var(--lime); color: #000; }
+  .divider { border-top: 1px solid rgba(35, 43, 54, 0.7); padding-top: 13px; }
+  .field { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .field > label { font-size: 12px; font-weight: 700; color: var(--muted); }
+  .chip {
+    padding: 5px 10px; border-radius: 8px; font-size: 12px; font-weight: 600;
+    background: var(--bg); border: 1px solid var(--border); color: #b6c2d1;
+  }
+  .chip:hover { border-color: #3d4a5c; }
+  .chip.on { background: var(--lime); color: #000; border-color: var(--lime); font-weight: 800; }
+  select {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 6px 9px; font-size: 12px; outline: none;
+  }
+  select:focus { border-color: var(--lime); }
+  .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+
+  .resultbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .resultbar h3 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 9px; font-weight: 800; }
+  .resultbar .n {
+    font-family: var(--mono); font-size: 12px; color: var(--lime);
+    background: var(--card); border: 1px solid var(--border); padding: 2px 9px; border-radius: 99px;
+  }
+  .hint { font-size: 12px; color: var(--muted); }
+
+  /* grid */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    overflow: hidden; display: flex; flex-direction: column; transition: 0.18s;
+  }
+  .card:hover { transform: translateY(-2px); border-color: #3d4a5c; box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35); }
+  .thumb { height: 132px; background: #0f141a center/cover no-repeat; position: relative; }
+  .thumb .ph { position: absolute; inset: 0; display: grid; place-items: center; color: #2f3b4a; font-size: 30px; }
+  .thumb .tags { position: absolute; top: 8px; left: 8px; display: flex; gap: 5px; flex-wrap: wrap; }
+  .tag {
+    font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px;
+    padding: 3px 7px; border-radius: 5px; background: rgba(11, 14, 18, 0.85); color: #cbd5e1;
+    backdrop-filter: blur(4px);
+  }
+  .tag.new { background: var(--accent); color: #fff; }
+  .tag.closed { background: #334155; color: #cbd5e1; }
+  .card .body { padding: 13px 14px 0; flex: 1; }
+  .card h4 { margin: 0 0 6px; font-size: 15px; line-height: 1.3; font-weight: 800; }
+  .meta { font-size: 11.5px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .countdown { font-family: var(--mono); font-size: 11px; color: var(--lime); }
+  .countdown.soon { color: var(--accent); }
+  .distances { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 9px; }
+  .dist {
+    font-family: var(--mono); font-size: 11px; font-weight: 700;
+    background: var(--bg); border: 1px solid var(--border); color: #c3cfdd;
+    padding: 2px 7px; border-radius: 5px;
+  }
+  .price { font-family: var(--mono); font-size: 11px; color: #7dd3a0; margin-top: 8px; }
+  .card .foot {
+    margin-top: 12px; padding: 10px 14px; border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    background: #12161d;
+  }
+  .portal { font-size: 11px; color: var(--muted); }
+  .portal b { color: #cbd5e1; }
+  .star { font-size: 17px; color: #4b5768; padding: 2px 4px; line-height: 1; }
+  .star.on { color: #fbbf24; }
+
+  /* empty */
+  .empty { text-align: center; padding: 60px 20px; background: var(--card); border: 1px dashed var(--border); border-radius: 16px; }
+  .empty h4 { margin: 0 0 6px; font-size: 17px; }
+  .empty p { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+
+  /* drawer */
+  .scrim {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.72); z-index: 60;
+    display: none; justify-content: flex-end; backdrop-filter: blur(2px);
+  }
+  .scrim.open { display: flex; }
+  .drawer {
+    width: min(620px, 100%); background: #0f141a; border-left: 1px solid var(--border);
+    height: 100%; overflow-y: auto; display: flex; flex-direction: column;
+  }
+  .drawer header {
+    position: sticky; top: 0; background: #131922; border-bottom: 1px solid var(--border);
+    padding: 16px 18px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  }
+  .drawer header h3 { margin: 0; font-size: 17px; line-height: 1.3; font-weight: 800; }
+  .drawer .sect { padding: 16px 18px; border-bottom: 1px solid rgba(35, 43, 54, 0.6); }
+  .drawer .sect h5 {
+    margin: 0 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.9px;
+    color: var(--muted); font-weight: 800;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid rgba(35, 43, 54, 0.6); }
+  th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
+  td.money { font-family: var(--mono); color: #7dd3a0; }
+  td.dim { color: var(--muted); }
+  .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .shot { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg); }
+  .shot a { display: block; }
+  .shot img { width: 100%; height: 130px; object-fit: contain; background: #0b0e12; display: block; }
+  .shot figcaption { font-size: 10.5px; padding: 6px 8px; color: var(--muted); }
+  .buylist { display: grid; gap: 8px; }
+  .buy {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; font-size: 13px; font-weight: 700;
+  }
+  .buy:hover { border-color: var(--lime); color: var(--lime); }
+  .buy small { display: block; font-weight: 500; color: var(--muted); font-size: 10.5px; word-break: break-all; }
+  .kv { display: grid; grid-template-columns: 92px 1fr; gap: 7px 12px; font-size: 13px; }
+  .kv dt { color: var(--muted); font-size: 12px; }
+  .kv dd { margin: 0; }
+  .prose { font-size: 13px; color: #b6c2d1; white-space: pre-wrap; }
+
+  /* season modal */
+  .modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.78); z-index: 70; display: none; padding: 20px; }
+  .modal.open { display: grid; place-items: center; }
+  .sheet {
+    background: #11161d; border: 1px solid var(--border); border-radius: 16px;
+    width: min(760px, 100%); max-height: 88vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .sheet > header {
+    position: static; background: #151b24; padding: 15px 18px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .sheet > header h3 { margin: 0; font-size: 15px; }
+  .sheet > header p { margin: 2px 0 0; font-size: 11.5px; color: var(--muted); }
+  .sheet .list { padding: 16px 18px; overflow-y: auto; display: grid; gap: 10px; flex: 1; }
+  .season-item { background: var(--card); border: 1px solid var(--border); border-radius: 11px; padding: 12px; display: grid; gap: 9px; }
+  .season-item .top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+  .season-item h4 { margin: 0; font-size: 13.5px; }
+  .season-item .inputs { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+  .season-item label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); display: grid; gap: 3px; }
+  .season-item input, .season-item select {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    border-radius: 7px; padding: 5px 8px; font-size: 12px; font-family: var(--mono); outline: none;
+  }
+  .season-item input:focus, .season-item select:focus { border-color: var(--lime); }
+  .sheet > footer { padding: 13px 18px; border-top: 1px solid var(--border); background: #131922; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .pace { font-family: var(--mono); font-size: 11.5px; color: #fbbf24; }
+
+  /* toast */
+  #toast {
+    position: fixed; bottom: 22px; right: 22px; z-index: 90;
+    background: #11161d; border: 1px solid var(--lime); border-radius: 11px;
+    padding: 11px 15px; font-size: 12.5px; font-weight: 700;
+    transform: translateY(90px); opacity: 0; transition: 0.25s; pointer-events: none;
+  }
+  #toast.show { transform: translateY(0); opacity: 1; }
+
+  footer.site { margin-top: auto; border-top: 1px solid var(--border); background: #0a0d11; padding: 20px 0; font-size: 12px; color: #5c6a7c; }
+  footer.site .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  @media (max-width: 640px) {
+    .bar { height: auto; padding: 10px 0; flex-wrap: wrap; }
+    .brand p { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap bar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">🏃</div>
+      <div>
+        <h1>RUN<span>HUB</span> <span style="font-size:10px;color:#8b98a9;vertical-align:middle">MY</span></h1>
+        <p>Malaysian race calendar &amp; entitlement index</p>
+      </div>
+    </div>
+    <div class="hdr-actions">
+      <span class="pill" id="syncPill"><span class="dot" id="syncDot"></span><span id="syncText">—</span></span>
+      <button class="btn" id="syncBtn" title="Fetch the latest events from every portal">↻ Sync now</button>
+      <button class="btn" id="seasonBtn">🏁 My Season <span class="badge-count" id="seasonBadge">0</span></button>
+    </div>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <div class="kicker">Verified portals · deep links only</div>
+    <h2>Find your next race — and know <em>exactly what you get</em>.</h2>
+    <p>Distances, price tiers, event tee vs finisher tee, medal and race-pack collection, aggregated from Malaysia's ticketing portals and deduplicated into one calendar.</p>
+    <div class="portals" id="portals">
+      <span>Indexed</span>
+    </div>
+  </div>
+</section>
+
+<main class="wrap">
+  <div class="filters">
+    <div class="row">
+      <div class="search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input type="search" id="q" placeholder="Search race, venue or organiser (e.g. KLSCM, Twincity, Penang)…" aria-label="Search races" />
+      </div>
+      <div class="seg" id="yearSeg" role="group" aria-label="Year">
+        <button data-year="ALL" class="on">All</button>
+        <button data-year="2026">2026</button>
+        <button data-year="2027">2027</button>
+      </div>
+    </div>
+
+    <div class="row divider">
+      <div class="field">
+        <label>Distance</label>
+        <div id="distChips" style="display:flex;gap:5px;flex-wrap:wrap">
+          <button class="chip on" data-dist="ALL">All</button>
+          <button class="chip" data-dist="42">42K</button>
+          <button class="chip" data-dist="21">21K</button>
+          <button class="chip" data-dist="10">10K</button>
+          <button class="chip" data-dist="5">5K</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Entitlement</label>
+        <div id="tierChips" style="display:flex;gap:5px;flex-wrap:wrap">
+          <button class="chip on" data-tier="ALL">All</button>
+          <button class="chip" data-tier="GLOBAL">Global brand kit</button>
+          <button class="chip" data-tier="CUSTOM">Custom tee</button>
+          <button class="chip" data-tier="MEDAL">Medal</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>State</label>
+        <select id="stateSel"><option value="ALL">All states</option></select>
+      </div>
+      <label class="toggle"><input type="checkbox" id="showPast" /> include past</label>
+    </div>
+  </div>
+
+  <div class="resultbar">
+    <h3>Race calendar <span class="n" id="count">0</span></h3>
+    <span class="hint">Click a card for the full entitlement breakdown · ★ saves to My Season</span>
+  </div>
+
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden>
+    <h4>No races match these filters</h4>
+    <p>Try clearing the search, or sync to pull the latest events.</p>
+    <button class="btn primary" id="resetBtn">Reset filters</button>
+  </div>
+  <div class="empty" id="emptyDb" hidden>
+    <h4>The calendar is empty</h4>
+    <p>Run a sync to fetch events from the portals.</p>
+    <button class="btn primary" id="emptySyncBtn">Sync now</button>
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <span><b style="color:#cbd5e1">RunHub MY</b> — independent, non-profit aggregator. Every race links to its official ticket page.</span>
+    <span id="footerSync">—</span>
+  </div>
+</footer>
+
+<!-- detail drawer -->
+<div class="scrim" id="scrim">
+  <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle"></aside>
+</div>
+
+<!-- season modal -->
+<div class="modal" id="seasonModal">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="seasonTitle">
+    <header>
+      <div>
+        <h3 id="seasonTitle">My Season</h3>
+        <p>Targets are saved on the server, not in this browser.</p>
+      </div>
+      <button class="btn" id="closeSeason">✕</button>
+    </header>
+    <div class="list" id="seasonList"></div>
+    <footer>
+      <span class="hint">Pace is derived from your goal time and distance.</span>
+      <div style="display:flex;gap:8px">
+        <button class="btn" id="copySeason">Copy plan</button>
+        <button class="btn" id="clearSeason" style="color:#fb7185">Clear all</button>
+      </div>
+    </footer>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script type="module">
+const $ = (s) => document.querySelector(s);
+const api = async (path, opts) => {
+  const res = await fetch(path, opts);
+  if (!res.ok) throw new Error(`${path}: ${res.status}`);
+  return res.json();
+};
+const esc = (s) =>
+  String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const GLOBAL_KIT = /\b(asics|adidas|nike|puma|new balance|under armour|hoka|saucony|brooks|mizuno|on running|reebok|decathlon)\b/i;
+
+const state = {
+  events: [],
+  myRaces: [],
+  filters: { q: "", year: "ALL", dist: "ALL", tier: "ALL", state: "ALL", showPast: false },
+  lastVisit: Number(localStorage.getItem("runhub_last_visit") || 0),
+  syncing: false,
+};
+
+/* ---------- helpers ---------- */
+const daysUntil = (iso) => {
+  if (!iso) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((new Date(`${iso}T00:00:00`) - today) / 86400000);
+};
+
+const money = (n) => (n == null || Number.isNaN(n) ? null : `RM${Number(n).toFixed(2).replace(/\.00$/, "")}`);
+
+const distancesOf = (ev) =>
+  [...new Set((ev.categories ?? []).map((c) => c.distance_km).filter((d) => d != null))].sort((a, b) => a - b);
+
+const priceRange = (ev) => {
+  const prices = (ev.categories ?? []).map((c) => c.price_normal ?? c.price_early).filter((p) => p != null);
+  if (!prices.length) return null;
+  const lo = Math.min(...prices);
+  const hi = Math.max(...prices);
+  return lo === hi ? money(lo) : `${money(lo)} – ${money(hi)}`;
+};
+
+/** Entitlement tier is derived, never hand-graded: global brand > custom tee > medal only. */
+const tierOf = (ev) => {
+  const text = `${ev.title} ${ev.description ?? ""} ${(ev.entitlements ?? []).map((e) => e.title).join(" ")}`;
+  if (GLOBAL_KIT.test(text)) return "GLOBAL";
+  if ((ev.entitlements ?? []).some((e) => /tee|jersey|shirt/i.test(e.kind ?? "") || /tee|jersey|shirt/i.test(e.title ?? ""))) return "CUSTOM";
+  if ((ev.entitlements ?? []).some((e) => /medal/i.test(e.kind ?? "") || /medal/i.test(e.title ?? ""))) return "MEDAL";
+  return "UNKNOWN";
+};
+
+const isNew = (ev) => state.lastVisit > 0 && Date.parse(ev.first_seen_at ?? 0) > state.lastVisit;
+
+function toast(msg) {
+  const el = $("#toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => el.classList.remove("show"), 2600);
+}
+
+/* ---------- data ---------- */
+async function load() {
+  const [events, myRaces, status] = await Promise.all([
+    api("/api/events"),
+    api("/api/my-races"),
+    api("/api/sync/status"),
+  ]);
+  state.events = events;
+  state.myRaces = myRaces;
+  renderPortals();
+  renderStates();
+  renderSync(status);
+  render();
+  renderSeasonBadge();
+}
+
+function renderPortals() {
+  const portals = [...new Set(state.events.flatMap((e) => (e.sources ?? []).map((s) => s.portal)))].sort();
+  $("#portals").innerHTML = `<span>Indexed</span>${portals
+    .map((p) => `<span>${esc(p)}</span>`)
+    .join("")}`;
+}
+
+function renderStates() {
+  const sel = $("#stateSel");
+  const states = [...new Set(state.events.map((e) => e.state).filter(Boolean))].sort();
+  const current = sel.value;
+  sel.innerHTML = `<option value="ALL">All states</option>${states
+    .map((s) => `<option value="${esc(s)}">${esc(s)}</option>`)
+    .join("")}`;
+  sel.value = states.includes(current) ? current : "ALL";
+}
+
+function renderSync(status) {
+  const dot = $("#syncDot");
+  const text = $("#syncText");
+  state.syncing = Boolean(status.running);
+  dot.classList.toggle("busy", state.syncing);
+
+  if (state.syncing) {
+    text.textContent = "Syncing…";
+  } else if (!status.finished_at) {
+    text.textContent = "Never synced";
+  } else {
+    const secs = Math.max(0, Math.round((Date.now() - Date.parse(status.finished_at)) / 1000));
+    text.textContent = secs < 90 ? `Synced ${secs}s ago` : `Synced ${Math.round(secs / 60)}m ago`;
+    const counts = status.counts ? JSON.parse(status.counts) : null;
+    const errors = status.errors ? JSON.parse(status.errors) : [];
+    $("#footerSync").textContent = counts
+      ? `${counts.unique ?? 0} events · ${counts.categories ?? 0} categories · ${errors.length} portal warnings`
+      : "—";
+  }
+  $("#syncBtn").disabled = state.syncing;
+}
+
+/* ---------- filtering ---------- */
+function visible() {
+  const f = state.filters;
+  const q = f.q.trim().toLowerCase();
+
+  return state.events.filter((ev) => {
+    const dists = distancesOf(ev);
+
+    if (!f.showPast) {
+      const d = daysUntil(ev.start_date);
+      if (d !== null && d < 0) return false;
+    }
+    if (f.year !== "ALL" && !(ev.start_date ?? "").startsWith(f.year)) return false;
+    if (f.state !== "ALL" && ev.state !== f.state) return false;
+    if (f.dist !== "ALL") {
+      const want = Number(f.dist);
+      const hit = dists.some((d) => (want === 42 ? d >= 40 : want === 21 ? d >= 20 && d < 40 : want === 10 ? d >= 9 && d < 20 : d >= 4 && d < 9));
+      if (!hit) return false;
+    }
+    if (f.tier !== "ALL" && tierOf(ev) !== f.tier) return false;
+    if (q) {
+      const hay = `${ev.title} ${ev.venue ?? ""} ${ev.state ?? ""} ${ev.organizer ?? ""} ${(ev.sources ?? []).map((s) => s.portal).join(" ")}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+/* ---------- render ---------- */
+function render() {
+  const list = visible();
+  const grid = $("#grid");
+  const hasAny = state.events.length > 0;
+
+  $("#count").textContent = `${list.length} of ${state.events.length}`;
+  $("#empty").hidden = list.length > 0 || !hasAny;
+  $("#emptyDb").hidden = hasAny;
+  grid.innerHTML = "";
+
+  const saved = new Set(state.myRaces.map((r) => r.event_id));
+  const frag = document.createDocumentFragment();
+
+  for (const ev of list) {
+    const dists = distancesOf(ev);
+    const price = priceRange(ev);
+    const d = daysUntil(ev.start_date);
+    const card = document.createElement("article");
+    card.className = "card";
+    card.dataset.id = ev.id;
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", `Open details for ${ev.title}`);
+
+    const tags = [];
+    if (isNew(ev)) tags.push('<span class="tag new">New</span>');
+    if (ev.status && /closed|sold/i.test(ev.status)) tags.push('<span class="tag closed">Closed</span>');
+    for (const s of ev.sources ?? []) tags.push(`<span class="tag">${esc(s.portal)}</span>`);
+
+    const countdown =
+      d === null ? "" : d === 0 ? '<span class="countdown soon">Race day</span>' : d > 0 ? `<span class="countdown${d <= 14 ? " soon" : ""}">${d}d to go</span>` : `<span class="countdown">${Math.abs(d)}d ago</span>`;
+
+    card.innerHTML = `
+      <div class="thumb" ${ev.banner_url ? `style="background-image:url('${encodeURI(ev.banner_url)}')"` : ""}>
+        ${ev.banner_url ? "" : '<span class="ph">🏁</span>'}
+        <div class="tags">${tags.join("")}</div>
+      </div>
+      <div class="body">
+        <h4>${esc(ev.title)}</h4>
+        <div class="meta">
+          <span>${esc(ev.start_date ?? "date TBC")}</span>
+          ${ev.state ? `<span>· ${esc(ev.state)}</span>` : ""}
+          ${countdown}
+        </div>
+        ${dists.length ? `<div class="distances">${dists.map((x) => `<span class="dist">${x}km</span>`).join("")}</div>` : ""}
+        ${price ? `<div class="price">${price}</div>` : ""}
+      </div>
+      <div class="foot">
+        <span class="portal">via <b>${esc((ev.sources ?? [])[0]?.portal ?? "—")}</b></span>
+        <button class="star ${saved.has(ev.id) ? "on" : ""}" data-star="${esc(ev.id)}" aria-pressed="${saved.has(ev.id)}" title="Save to My Season">${saved.has(ev.id) ? "★" : "☆"}</button>
+      </div>`;
+    frag.appendChild(card);
+  }
+  grid.appendChild(frag);
+}
+
+function renderSeasonBadge() {
+  $("#seasonBadge").textContent = state.myRaces.length;
+}
+
+/* ---------- drawer ---------- */
+async function openDrawer(id) {
+  const ev = await api(`/api/events/${encodeURIComponent(id)}`);
+  const saved = state.myRaces.find((r) => r.event_id === id);
+  const cats = ev.categories ?? [];
+  const ents = ev.entitlements ?? [];
+  const shots = ents.filter((e) => e.image_url);
+  const notes = ents.filter((e) => !e.image_url && e.title);
+
+  const rows = cats.length
+    ? `<table><thead><tr><th>Category</th><th>Dist</th><th>Early</th><th>Normal</th><th>Flag-off</th></tr></thead><tbody>
+        ${cats.map((c) => `<tr>
+          <td>${esc(c.label ?? "—")}${c.price_note ? `<div class="dim" style="font-size:10.5px">${esc(c.price_note)}</div>` : ""}</td>
+          <td class="dim">${c.distance_km != null ? `${c.distance_km}km` : "—"}</td>
+          <td class="money">${money(c.price_early) ?? "—"}</td>
+          <td class="money">${money(c.price_normal) ?? "—"}</td>
+          <td class="dim">${esc(c.flag_off_time ?? "—")}</td>
+        </tr>`).join("")}
+      </tbody></table>`
+    : `<p class="hint">No category or price table published on this portal.</p>`;
+
+  const pack = (ev.race_pack ?? []).map((p) => `<li>${esc([p.date, p.time, p.venue].filter(Boolean).join(" · "))}</li>`).join("");
+  const keyDates = (ev.key_dates ?? []).map((k) => `<li>${esc(k.date ?? "")} — ${esc(k.title ?? "")}</li>`).join("");
+
+  $("#drawer").innerHTML = `
+    <header>
+      <div>
+        <h3 id="drawerTitle">${esc(ev.title)}</h3>
+        <div class="meta" style="margin-top:5px">
+          <span>${esc(ev.start_date ?? "date TBC")}</span>
+          ${ev.state ? `<span>· ${esc(ev.state)}</span>` : ""}
+          ${ev.organizer ? `<span>· ${esc(ev.organizer)}</span>` : ""}
+        </div>
+      </div>
+      <button class="btn" id="closeDrawer" aria-label="Close">✕</button>
+    </header>
+
+    <div class="sect">
+      <h5>Buy / official links</h5>
+      <div class="buylist">
+        ${(ev.sources ?? []).map((s) => `<a class="buy" href="${esc(s.source_url)}" target="_blank" rel="noopener noreferrer">
+          <span>${esc(s.portal)} <small>${esc(s.source_url)}</small></span><span>↗</span></a>`).join("")}
+      </div>
+    </div>
+
+    <div class="sect">
+      <h5>Distances &amp; prices</h5>
+      ${rows}
+    </div>
+
+    ${shots.length ? `<div class="sect"><h5>Entitlements</h5><div class="shots">
+      ${shots.map((e) => `<figure class="shot"><a href="${esc(e.image_url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(e.image_url)}" alt="${esc(e.title ?? e.kind ?? "entitlement")}" loading="lazy" /></a><figcaption>${esc(e.title ?? e.kind ?? "")}</figcaption></figure>`).join("")}
+    </div></div>` : ""}
+
+    ${notes.length ? `<div class="sect"><h5>Also included</h5><ul class="prose">${notes.map((e) => `<li>${esc(e.title)}</li>`).join("")}</ul></div>` : ""}
+
+    ${pack || keyDates ? `<div class="sect"><h5>Race pack &amp; key dates</h5><ul class="prose">${pack}${keyDates}</ul></div>` : ""}
+
+    ${ev.registration_deadline ? `<div class="sect"><h5>Registration closes</h5><p class="prose">${esc(ev.registration_deadline)}</p></div>` : ""}
+
+    <div class="sect">
+      <h5>Details</h5>
+      <dl class="kv">
+        <dt>Venue</dt><dd>${esc(ev.venue ?? "—")}</dd>
+        <dt>Status</dt><dd>${esc(ev.status ?? "—")}</dd>
+        <dt>First seen</dt><dd>${esc((ev.first_seen_at ?? "").slice(0, 10) || "—")}</dd>
+      </dl>
+    </div>
+
+    ${ev.description ? `<div class="sect"><h5>About</h5><p class="prose">${esc(ev.description)}</p></div>` : ""}
+
+    <div class="sect" style="border-bottom:0">
+      <button class="btn ${saved ? "" : "primary"}" id="drawerSave">${saved ? "Remove from My Season" : "★ Add to My Season"}</button>
+    </div>`;
+
+  $("#scrim").classList.add("open");
+  document.body.style.overflow = "hidden";
+  $("#closeDrawer").onclick = closeDrawer;
+  $("#drawerSave").onclick = () => toggleSave(id).then(closeDrawer);
+}
+
+function closeDrawer() {
+  $("#scrim").classList.remove("open");
+  document.body.style.overflow = "";
+}
+
+/* ---------- my season ---------- */
+async function toggleSave(id) {
+  const existing = state.myRaces.find((r) => r.event_id === id);
+  if (existing) {
+    await api(`/api/my-races?event_id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    state.myRaces = state.myRaces.filter((r) => r.event_id !== id);
+    toast("Removed from My Season");
+  } else {
+    const ev = state.events.find((e) => e.id === id);
+    const dists = distancesOf(ev ?? {});
+    await api("/api/my-races", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event_id: id,
+        my_status: "watchlist",
+        target_distance: dists.includes(21) ? "21" : dists[0] != null ? String(dists[0]) : null,
+      }),
+    });
+    state.myRaces = await api("/api/my-races");
+    toast("Added to My Season");
+  }
+  renderSeasonBadge();
+  render();
+}
+
+const paceFor = (time, dist) => {
+  const km = Number(dist);
+  if (!time || !km) return null;
+  const parts = String(time).split(":").map(Number);
+  if (parts.some(Number.isNaN)) return null;
+  const mins = parts.length === 3 ? parts[0] * 60 + parts[1] + parts[2] / 60 : parts.length === 2 ? parts[0] * 60 + parts[1] : null;
+  if (!mins) return null;
+  const per = mins / km;
+  const m = Math.floor(per);
+  const s = Math.round((per - m) * 60);
+  return `${m}:${String(s).padStart(2, "0")} /km`;
+};
+
+async function openSeason() {
+  state.myRaces = await api("/api/my-races");
+  renderSeasonBadge();
+  const list = $("#seasonList");
+
+  if (!state.myRaces.length) {
+    list.innerHTML = `<p class="hint" style="text-align:center;padding:26px 0">No target races yet. Star a race on the calendar to plan your season.</p>`;
+  } else {
+    list.innerHTML = state.myRaces
+      .map((r) => {
+        const dists = distancesOf(r);
+        const pace = paceFor(r.target_time, r.target_distance);
+        const d = daysUntil(r.start_date);
+        return `<div class="season-item" data-id="${esc(r.event_id)}">
+          <div class="top">
+            <div>
+              <h4>${esc(r.title ?? r.event_id)}</h4>
+              <div class="meta"><span>${esc(r.start_date ?? "date TBC")}</span>${r.state ? `<span>· ${esc(r.state)}</span>` : ""}${d != null ? `<span>· ${d}d to go</span>` : ""}</div>
+            </div>
+            <button class="btn" data-remove="${esc(r.event_id)}" title="Remove" style="color:#fb7185">✕</button>
+          </div>
+          <div class="inputs">
+            <label>Status
+              <select data-field="my_status" data-id="${esc(r.event_id)}">
+                ${["watchlist", "registered", "skip"].map((s) => `<option value="${s}" ${r.my_status === s ? "selected" : ""}>${s}</option>`).join("")}
+              </select>
+            </label>
+            <label>Distance
+              <select data-field="target_distance" data-id="${esc(r.event_id)}">
+                <option value="">—</option>
+                ${dists.map((x) => `<option value="${x}" ${String(r.target_distance) === String(x) ? "selected" : ""}>${x}km</option>`).join("")}
+              </select>
+            </label>
+            <label>Goal (h:mm)
+              <input data-field="target_time" data-id="${esc(r.event_id)}" value="${esc(r.target_time ?? "")}" placeholder="1:45" size="7" />
+            </label>
+            <label>Shirt
+              <input data-field="shirt_size" data-id="${esc(r.event_id)}" value="${esc(r.shirt_size ?? "")}" placeholder="M" size="4" />
+            </label>
+            ${pace ? `<span class="pace">${pace}</span>` : ""}
+          </div>
+        </div>`;
+      })
+      .join("");
+  }
+  $("#seasonModal").classList.add("open");
+}
+
+/* ---------- events ---------- */
+$("#q").addEventListener("input", (e) => { state.filters.q = e.target.value; render(); });
+$("#stateSel").addEventListener("change", (e) => { state.filters.state = e.target.value; render(); });
+$("#showPast").addEventListener("change", (e) => { state.filters.showPast = e.target.checked; render(); });
+
+$("#yearSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-year]");
+  if (!b) return;
+  state.filters.year = b.dataset.year;
+  [...$("#yearSeg").children].forEach((x) => x.classList.toggle("on", x === b));
+  render();
+});
+
+for (const [sel, key] of [["#distChips", "dist"], ["#tierChips", "tier"]]) {
+  $(sel).addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    state.filters[key] = b.dataset[key];
+    [...$(sel).children].forEach((x) => x.classList.toggle("on", x === b));
+    render();
+  });
+}
+
+$("#resetBtn").addEventListener("click", () => {
+  state.filters = { q: "", year: "ALL", dist: "ALL", tier: "ALL", state: "ALL", showPast: false };
+  $("#q").value = "";
+  $("#stateSel").value = "ALL";
+  $("#showPast").checked = false;
+  [...$("#yearSeg").children].forEach((x) => x.classList.toggle("on", x.dataset.year === "ALL"));
+  [...$("#distChips").children].forEach((x) => x.classList.toggle("on", x.dataset.dist === "ALL"));
+  [...$("#tierChips").children].forEach((x) => x.classList.toggle("on", x.dataset.tier === "ALL"));
+  render();
+});
+
+$("#grid").addEventListener("click", (e) => {
+  const star = e.target.closest("[data-star]");
+  if (star) {
+    e.stopPropagation();
+    toggleSave(star.dataset.star);
+    return;
+  }
+  const card = e.target.closest(".card");
+  if (card) openDrawer(card.dataset.id);
+});
+
+$("#grid").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const card = e.target.closest(".card");
+  if (card) {
+    e.preventDefault();
+    openDrawer(card.dataset.id);
+  }
+});
+
+$("#scrim").addEventListener("click", (e) => { if (e.target.id === "scrim") closeDrawer(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    closeDrawer();
+    $("#seasonModal").classList.remove("open");
+  }
+});
+
+$("#seasonBtn").addEventListener("click", openSeason);
+$("#closeSeason").addEventListener("click", () => $("#seasonModal").classList.remove("open"));
+$("#seasonModal").addEventListener("click", (e) => { if (e.target.id === "seasonModal") $("#seasonModal").classList.remove("open"); });
+
+$("#seasonList").addEventListener("click", async (e) => {
+  const rm = e.target.closest("[data-remove]");
+  if (!rm) return;
+  await api(`/api/my-races?event_id=${encodeURIComponent(rm.dataset.remove)}`, { method: "DELETE" });
+  state.myRaces = state.myRaces.filter((r) => r.event_id !== rm.dataset.remove);
+  renderSeasonBadge();
+  render();
+  openSeason();
+});
+
+$("#seasonList").addEventListener("change", async (e) => {
+  const el = e.target.closest("[data-field]");
+  if (!el) return;
+  const row = state.myRaces.find((r) => r.event_id === el.dataset.id);
+  if (!row) return;
+  row[el.dataset.field] = el.value || null;
+  await api("/api/my-races", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      event_id: row.event_id,
+      my_status: row.my_status ?? null,
+      target_distance: row.target_distance ?? null,
+      target_time: row.target_time ?? null,
+      shirt_size: row.shirt_size ?? null,
+      notes: row.notes ?? null,
+    }),
+  });
+  openSeason();
+});
+
+$("#copySeason").addEventListener("click", async () => {
+  if (!state.myRaces.length) return toast("Nothing to copy");
+  const text = ["MY MALAYSIA RACE SEASON (via RunHub MY)", ""];
+  for (const r of state.myRaces) {
+    const pace = paceFor(r.target_time, r.target_distance);
+    text.push(`• ${r.title ?? r.event_id} — ${r.start_date ?? "TBC"}`);
+    text.push(`  ${r.my_status ?? "watchlist"}${r.target_distance ? ` · ${r.target_distance}km` : ""}${r.target_time ? ` · goal ${r.target_time}${pace ? ` (${pace})` : ""}` : ""}`);
+  }
+  try {
+    await navigator.clipboard.writeText(text.join("\n"));
+    toast("Season plan copied");
+  } catch {
+    toast("Clipboard blocked by the browser");
+  }
+});
+
+$("#clearSeason").addEventListener("click", async () => {
+  for (const r of state.myRaces) {
+    await api(`/api/my-races?event_id=${encodeURIComponent(r.event_id)}`, { method: "DELETE" });
+  }
+  state.myRaces = [];
+  renderSeasonBadge();
+  render();
+  openSeason();
+  toast("Season cleared");
+});
+
+/* ---------- sync ---------- */
+async function startSync() {
+  if (state.syncing) return;
+  $("#syncBtn").disabled = true;
+  $("#syncDot").classList.add("busy");
+  $("#syncText").textContent = "Syncing…";
+  try {
+    await api("/api/sync/run", { method: "POST" });
+    toast("Sync started — this takes a few minutes");
+    pollSync();
+  } catch (e) {
+    toast(`Sync failed: ${e.message}`);
+    $("#syncBtn").disabled = false;
+  }
+}
+
+async function pollSync() {
+  try {
+    const status = await api("/api/sync/status");
+    renderSync(status);
+    if (status.running) return setTimeout(pollSync, 4000);
+    await load();
+    toast("Sync complete");
+  } catch (e) {
+    toast(`Sync status failed: ${e.message}`);
+  }
+}
+
+$("#syncBtn").addEventListener("click", startSync);
+$("#emptySyncBtn").addEventListener("click", startSync);
+
+/* ---------- boot ---------- */
+load()
+  .then(() => {
+    // Remember this visit *after* rendering so the "New" badges survive the page.
+    localStorage.setItem("runhub_last_visit", String(Date.now()));
+  })
+  .catch((e) => {
+    $("#grid").innerHTML = `<p class="hint">Failed to load: ${esc(e.message)}</p>`;
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LariHub MY | Malaysia Race Calendar & Apparel Hub</title>
+  <!-- Tailwind CSS CDN with forms and typography plugins -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              lime: '#C8FF00', // Modern athletic volt/lime
+              accent: '#FF4D00', // Safety neon race orange
+              dark: '#0c0f12',
+              card: '#161b22',
+              cardBorder: '#232b36',
+              lightCard: '#ffffff',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Menlo', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+  <!-- Phosphor Icons & Lucide support -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <style>
+    /* Custom scrollbars and styling */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0c0f12;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #2a3441;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #C8FF00;
+    }
+    .badge-glow-lime {
+      box-shadow: 0 0 15px rgba(200, 255, 0, 0.25);
+    }
+    .badge-glow-orange {
+      box-shadow: 0 0 15px rgba(255, 77, 0, 0.25);
+    }
+    /* Running track background pattern */
+    .bg-grid-pattern {
+      background-size: 32px 32px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    }
+  </style>
+</head>
+<body class="bg-[#0b0e12] text-slate-100 antialiased min-h-screen flex flex-col font-sans selection:bg-brand-lime selection:text-black">
+
+  <!-- TOP HEADER / NAV -->
+  <header class="sticky top-0 z-40 bg-[#0f141a]/90 backdrop-blur-md border-b border-brand-cardBorder">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <!-- Logo -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-brand-lime text-black flex items-center justify-center font-black text-xl shadow-lg shadow-brand-lime/20 tracking-tighter transform -rotate-3">
+          <i class="fa-solid fa-person-running text-xl"></i>
+        </div>
+        <div>
+          <span class="text-xl font-black tracking-tight flex items-center gap-1">
+            LARI<span class="text-brand-lime">HUB</span>
+            <span class="text-[10px] uppercase font-bold tracking-widest px-1.5 py-0.5 rounded bg-brand-cardBorder text-slate-300 ml-1">MY</span>
+          </span>
+          <p class="text-[10px] text-slate-400 font-medium hidden sm:block">Unified Race Finder & Finisher Apparel Index</p>
+        </div>
+      </div>
+
+      <!-- Action items -->
+      <div class="flex items-center gap-2 sm:gap-4">
+        <!-- Quick Stats badge -->
+        <div class="hidden md:flex items-center gap-2 text-xs font-mono bg-slate-900 border border-brand-cardBorder px-3 py-1.5 rounded-full text-slate-300">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+          <span id="activeRaceCount">14 Races Indexed</span>
+        </div>
+
+        <!-- Saved Target Season Button -->
+        <button id="seasonPlannerBtn" class="relative flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-sm font-semibold bg-brand-card hover:bg-slate-800 border border-brand-cardBorder transition text-brand-lime">
+          <i class="fa-solid fa-flag-checkered text-brand-accent"></i>
+          <span>My Season</span>
+          <span id="savedRacesBadge" class="bg-brand-accent text-white text-[11px] font-bold px-1.5 py-0.2 rounded-full min-w-[18px] text-center">0</span>
+        </button>
+
+        <!-- Submit Event / Info modal -->
+        <button id="infoModalBtn" class="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800 transition" title="About LariHub">
+          <i class="fa-regular fa-circle-question text-lg"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- HERO SECTION -->
+  <div class="relative bg-gradient-to-b from-[#131922] via-[#0c0f12] to-[#0c0f12] border-b border-brand-cardBorder py-8 sm:py-10 bg-grid-pattern">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="max-w-3xl">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono bg-brand-lime/10 border border-brand-lime/30 text-brand-lime mb-3">
+          <i class="fa-solid fa-shirt"></i>
+          <span>No More Ugly Race Tees • Centralized Registrations</span>
+        </div>
+        <h1 class="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight text-white leading-tight">
+          Find your next PB & <span class="text-transparent bg-clip-text bg-gradient-to-r from-brand-lime to-emerald-400">race-worthy kit</span> in Malaysia.
+        </h1>
+        <p class="mt-3 text-sm sm:text-base text-slate-400 max-w-2xl leading-relaxed">
+          Aggregating verified road events across <strong>RaceXasia, CheckpointSpot, JomRun & BiiB</strong>. Filter specifically by technical apparel partners (ASICS, adidas, Streetwear) and plan your pacing blocks.
+        </p>
+      </div>
+
+      <!-- Quick Platform Tags -->
+      <div class="mt-6 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+        <span class="text-slate-500 font-semibold uppercase text-[10px] tracking-wider">Indexed Portals:</span>
+        <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300">CheckpointSpot</span>
+        <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300">RaceXasia</span>
+        <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300">JomRun</span>
+        <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300">BiiB / HeyRunner</span>
+        <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300">Direct Official</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN APP CONTAINER -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full">
+
+    <!-- SEARCH & FILTER CONTROLS BAR -->
+    <div class="bg-brand-card border border-brand-cardBorder rounded-2xl p-4 sm:p-5 shadow-xl mb-8 space-y-4">
+      
+      <!-- Top Row: Search Input & Year Selector -->
+      <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
+        <div class="relative sm:col-span-8 lg:col-span-9">
+          <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-500 text-sm"></i>
+          <input 
+            type="text" 
+            id="searchInput"
+            placeholder="Search race name (e.g. Twincity, KLSCM, BOOM), venue, or city..." 
+            class="w-full bg-[#0b0e12] border border-brand-cardBorder text-slate-100 text-sm rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:border-brand-lime transition placeholder-slate-500"
+          />
+        </div>
+        <div class="sm:col-span-4 lg:col-span-3 flex items-center gap-2">
+          <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">Year:</label>
+          <div class="grid grid-cols-3 w-full bg-[#0b0e12] p-1 rounded-xl border border-brand-cardBorder text-xs font-bold text-center">
+            <button data-year="ALL" class="year-filter-btn py-1.5 rounded-lg bg-brand-lime text-black transition">All</button>
+            <button data-year="2026" class="year-filter-btn py-1.5 rounded-lg text-slate-400 hover:text-white transition">2026</button>
+            <button data-year="2027" class="year-filter-btn py-1.5 rounded-lg text-slate-400 hover:text-white transition">2027</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Second Row: Deep Filtering Pills -->
+      <div class="pt-2 border-t border-brand-cardBorder/60 flex flex-wrap items-center justify-between gap-4">
+        
+        <!-- Distance Filters -->
+        <div class="flex flex-wrap items-center gap-1.5 text-xs">
+          <span class="text-slate-400 font-semibold mr-1 flex items-center gap-1">
+            <i class="fa-solid fa-route text-brand-lime text-[11px]"></i> Distance:
+          </span>
+          <button data-dist="ALL" class="dist-filter-btn px-2.5 py-1 rounded-lg bg-brand-lime text-black font-bold">All</button>
+          <button data-dist="42K" class="dist-filter-btn px-2.5 py-1 rounded-lg bg-[#0b0e12] border border-brand-cardBorder text-slate-300 hover:border-slate-500">42K (FM)</button>
+          <button data-dist="21K" class="dist-filter-btn px-2.5 py-1 rounded-lg bg-[#0b0e12] border border-brand-cardBorder text-slate-300 hover:border-slate-500">21K (HM)</button>
+          <button data-dist="10K" class="dist-filter-btn px-2.5 py-1 rounded-lg bg-[#0b0e12] border border-brand-cardBorder text-slate-300 hover:border-slate-500">10K / 12K</button>
+          <button data-dist="5K" class="dist-filter-btn px-2.5 py-1 rounded-lg bg-[#0b0e12] border border-brand-cardBorder text-slate-300 hover:border-slate-500">5K</button>
+        </div>
+
+        <!-- Apparel Aesthetic Tier Filter (The User's specific pain point) -->
+        <div class="flex flex-wrap items-center gap-1.5 text-xs">
+          <span class="text-slate-400 font-semibold mr-1 flex items-center gap-1">
+            <i class="fa-solid fa-shirt text-brand-accent text-[11px]"></i> Apparel Tier:
+          </span>
+          <button data-tier="ALL" class="tier-filter-btn px-2.5 py-1 rounded-lg bg-brand-lime text-black font-bold">All Tiers</button>
+          <button data-tier="GLOBAL" class="tier-filter-btn px-2.5 py-1 rounded-lg bg-[#0b0e12] border border-brand-cardBorder text-slate-300 hover:border-slate-500">
+            <span class="text-amber-400 mr-1">★</span> Global Partner (ASICS/adidas)
+          </button>
+          <button data-tier="STREET" class="tier-filter-btn px-2.5 py-1 rounded-lg bg-[#0b0e12] border border-brand-cardBorder text-slate-300 hover:border-slate-500">
+            Minimal Streetwear (BOOM)
+          </button>
+          <button data-tier="CUSTOM" class="tier-filter-btn px-2.5 py-1 rounded-lg bg-[#0b0e12] border border-brand-cardBorder text-slate-300 hover:border-slate-500">
+            Custom Graphic Sublimation
+          </button>
+        </div>
+
+        <!-- Region/Location Filter -->
+        <div class="flex items-center gap-2 text-xs">
+          <span class="text-slate-400 font-semibold">Location:</span>
+          <select id="regionSelect" class="bg-[#0b0e12] border border-brand-cardBorder text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-brand-lime">
+            <option value="ALL">All Regions in Malaysia</option>
+            <option value="Putrajaya">Putrajaya</option>
+            <option value="KL">Kuala Lumpur</option>
+            <option value="Selangor">Selangor / Cyberjaya</option>
+            <option value="Penang">Penang</option>
+            <option value="Borneo">Sabah & Sarawak</option>
+          </select>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ACTIVE FILTER CHIPS & RACE COUNT HEADER -->
+    <div class="flex items-center justify-between mb-6 flex-wrap gap-2">
+      <div class="flex items-center gap-2">
+        <h2 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+          <span>Upcoming & Verified Events</span>
+          <span id="filteredCountBadge" class="text-xs px-2 py-0.5 rounded-full bg-brand-card text-brand-lime border border-brand-cardBorder font-mono">0</span>
+        </h2>
+      </div>
+      <div class="text-xs text-slate-400">
+        Click <i class="fa-regular fa-star text-amber-400"></i> on any race card to add to your season goals.
+      </div>
+    </div>
+
+    <!-- RACE CARDS GRID -->
+    <div id="raceGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <!-- Injected dynamically via JS -->
+    </div>
+
+    <!-- EMPTY STATE -->
+    <div id="emptyState" class="hidden text-center py-16 px-4 bg-brand-card rounded-2xl border border-brand-cardBorder my-8">
+      <div class="w-16 h-16 mx-auto rounded-full bg-slate-800 flex items-center justify-center text-slate-400 text-2xl mb-4">
+        <i class="fa-solid fa-shoe-prints"></i>
+      </div>
+      <h3 class="text-lg font-bold text-white">No races match these exact filters</h3>
+      <p class="text-sm text-slate-400 mt-1 max-w-md mx-auto">Try resetting your apparel tier, distance, or search keyword to view the complete Malaysian calendar.</p>
+      <button id="resetFiltersBtn" class="mt-4 px-4 py-2 text-xs font-bold rounded-lg bg-brand-lime text-black hover:opacity-90 transition">
+        Reset All Filters
+      </button>
+    </div>
+
+  </main>
+
+  <!-- SEASON PLANNER MODAL / DRAWER -->
+  <div id="seasonModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-[#11161d] border border-brand-cardBorder w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+      <!-- Modal Header -->
+      <div class="p-5 border-b border-brand-cardBorder flex items-center justify-between bg-[#151b24]">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-brand-accent text-white flex items-center justify-center text-base">
+            <i class="fa-solid fa-calendar-check"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white tracking-tight">My Target Race Season Planner</h3>
+            <p class="text-xs text-slate-400">Set pacing targets, monitor countdowns, and export your target calendar</p>
+          </div>
+        </div>
+        <button id="closeSeasonModalBtn" class="text-slate-400 hover:text-white p-2 text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- Modal Body (Races List) -->
+      <div id="seasonListContainer" class="p-5 overflow-y-auto space-y-4 flex-1">
+        <!-- Rendered by JS -->
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="p-4 border-t border-brand-cardBorder bg-[#131922] flex flex-wrap items-center justify-between gap-3">
+        <div class="text-xs text-slate-400">
+          Target times calculate your necessary split pacing automatically.
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="copySeasonBtn" class="px-3.5 py-2 text-xs font-bold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition">
+            <i class="fa-regular fa-clipboard"></i> Copy Season Plan
+          </button>
+          <button id="clearSeasonBtn" class="px-3 py-2 text-xs font-semibold rounded-lg text-rose-400 hover:bg-rose-500/10 transition">
+            Clear All
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ABOUT & PORTAL DIRECTORY MODAL -->
+  <div id="infoModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-[#11161d] border border-brand-cardBorder w-full max-w-xl rounded-2xl shadow-2xl p-6">
+      <div class="flex items-center justify-between pb-4 border-b border-brand-cardBorder">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-compass text-brand-lime text-xl"></i>
+          <h3 class="font-bold text-white text-lg">About LariHub Malaysia</h3>
+        </div>
+        <button id="closeInfoModalBtn" class="text-slate-400 hover:text-white p-1">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="mt-4 space-y-3 text-sm text-slate-300 leading-relaxed">
+        <p>
+          Running events in Malaysia are notoriously fragmented across multiple ticketing portals. <strong>LariHub</strong> solves this by aggregating reputable road races and providing transparent grading of <strong>finisher apparel quality</strong> so you know what you are running for before paying.
+        </p>
+        <div class="p-3 bg-[#161c24] rounded-xl border border-brand-cardBorder space-y-2 mt-2">
+          <div class="text-xs font-bold text-brand-lime uppercase tracking-wider">Major Ticketing Hubs Indexed:</div>
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <a href="https://racexasia.com" target="_blank" rel="noopener" class="flex items-center gap-2 text-slate-300 hover:text-brand-lime">
+              <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i> RaceXasia
+            </a>
+            <a href="https://checkpointspot.asia" target="_blank" rel="noopener" class="flex items-center gap-2 text-slate-300 hover:text-brand-lime">
+              <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i> CheckpointSpot
+            </a>
+            <a href="https://jomrun.com" target="_blank" rel="noopener" class="flex items-center gap-2 text-slate-300 hover:text-brand-lime">
+              <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i> JomRun Portal
+            </a>
+            <a href="https://getbiib.com" target="_blank" rel="noopener" class="flex items-center gap-2 text-slate-300 hover:text-brand-lime">
+              <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i> BiiB Community
+            </a>
+          </div>
+        </div>
+      </div>
+      <div class="mt-6 text-right">
+        <button id="closeInfoModalBtn2" class="px-4 py-2 text-xs font-bold rounded-lg bg-brand-lime text-black hover:opacity-90">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION -->
+  <div id="toast" class="fixed bottom-6 right-6 z-50 transform translate-y-20 opacity-0 transition-all duration-300 bg-slate-900 border border-brand-lime text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 text-xs font-semibold">
+    <i class="fa-solid fa-circle-check text-brand-lime text-base"></i>
+    <span id="toastMsg">Action complete</span>
+  </div>
+
+  <!-- FOOTER -->
+  <footer class="mt-auto border-t border-brand-cardBorder bg-[#0a0d11] py-8 text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+      <div>
+        <span class="font-bold text-slate-300">LariHub MY</span> — Curated for Malaysian endurance runners, PB chasers, and kit lovers.
+      </div>
+      <div class="flex items-center gap-4">
+        <span>Sub-2:30 HM Ready</span>
+        <span>•</span>
+        <span>Independent Community Calendar</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- APPLICATION LOGIC & PRELOADED DATABASE -->
+  <script>
+    // PRELOADED VERIFIED MALAYSIAN RACE DATABASE (2026 & 2027)
+    const RACES = [
+      {
+        id: "twincity-2026",
+        name: "Twincity Marathon 2026",
+        edition: "11th Edition",
+        organizer: "TenSenses",
+        date: "2026-01-18",
+        dateDisplay: "17 – 18 January 2026",
+        year: 2026,
+        region: "Selangor",
+        location: "Cyberjaya / Putrajaya",
+        distances: ["42K", "21K", "12K", "5K"],
+        status: "Open",
+        registrationPortal: "RaceXasia",
+        registrationUrl: "https://www.racexasia.com",
+        apparel: {
+          partner: "TenSenses Custom",
+          tier: "CUSTOM", // CUSTOM | GLOBAL | STREET
+          tierLabel: "Custom Graphic Sublimation",
+          rating: 4.2,
+          fabric: "Soft Microfiber Dry-Fit",
+          cut: "Standard Asian Athletic Fit",
+          clutterScore: "Moderate (Geometric theme + race sponsors)",
+          description: "Vibrant neon geometric theme. Finisher tee features dedicated distance badge on sleeve with commemorative medal."
+        }
+      },
+      {
+        id: "twincity-2027",
+        name: "Twincity Marathon 2027",
+        edition: "12th Edition",
+        organizer: "TenSenses",
+        date: "2027-01-24",
+        dateDisplay: "23 – 24 January 2027",
+        year: 2027,
+        region: "Selangor",
+        location: "Cyberjaya / Putrajaya",
+        distances: ["42K", "21K", "12K", "10K", "5K"],
+        status: "Upcoming",
+        registrationPortal: "RaceXasia",
+        registrationUrl: "https://www.racexasia.com",
+        apparel: {
+          partner: "TenSenses Custom",
+          tier: "CUSTOM",
+          tierLabel: "Custom Graphic Sublimation",
+          rating: 4.3,
+          fabric: "Ultra-Lightweight Microfiber Weave",
+          cut: "Ergonomic Running Taper",
+          clutterScore: "Moderate",
+          description: "Annual opening marquee road race in Cyberjaya. High collector demand for the 21K and 42K finisher tees."
+        }
+      },
+      {
+        id: "klscm-2026",
+        name: "Kuala Lumpur Standard Chartered Marathon (KLSCM) 2026",
+        edition: "Flagship Edition",
+        organizer: "Dirigo Events",
+        date: "2026-10-04",
+        dateDisplay: "3 – 4 October 2026",
+        year: 2026,
+        region: "KL",
+        location: "Dataran Merdeka, Kuala Lumpur",
+        distances: ["42K", "21K", "10K", "5K"],
+        status: "Upcoming",
+        registrationPortal: "Official / Dirigo",
+        registrationUrl: "https://www.kl-marathon.com",
+        apparel: {
+          partner: "ASICS",
+          tier: "GLOBAL",
+          tierLabel: "Global Athletic Partner (ASICS)",
+          rating: 4.9,
+          fabric: "ASICS Technical Breathable Jacquard Mesh",
+          cut: "Pro Athletic Cut with reflective heat-transfers",
+          clutterScore: "Ultra-Clean (Zero trash sponsors, pure ASICS minimalism)",
+          description: "The gold standard of Malaysian race jerseys. Authentic ASICS manufactured performance tees that stay in your active rotation."
+        }
+      },
+      {
+        id: "klscm-2027",
+        name: "Kuala Lumpur Standard Chartered Marathon (KLSCM) 2027",
+        edition: "Flagship Edition",
+        organizer: "Dirigo Events",
+        date: "2027-10-03",
+        dateDisplay: "2 – 3 October 2027",
+        year: 2027,
+        region: "KL",
+        location: "Dataran Merdeka, Kuala Lumpur",
+        distances: ["42K", "21K", "10K", "5K"],
+        status: "Upcoming",
+        registrationPortal: "Official / Dirigo",
+        registrationUrl: "https://www.kl-marathon.com",
+        apparel: {
+          partner: "ASICS",
+          tier: "GLOBAL",
+          tierLabel: "Global Athletic Partner (ASICS)",
+          rating: 4.9,
+          fabric: "ASICS Actibreeze High-Ventilation Tech",
+          cut: "Pro Athletic Cut",
+          clutterScore: "Ultra-Clean",
+          description: "Malaysia's premier World Athletics Label road race with genuine global sportswear execution."
+        }
+      },
+      {
+        id: "score-2026",
+        name: "SCORE Marathon 2026 (by AIA Vitality)",
+        edition: "Annual Putrajaya Edition",
+        organizer: "SCORE Sports / AIA",
+        date: "2026-07-19",
+        dateDisplay: "18 – 19 July 2026",
+        year: 2026,
+        region: "Putrajaya",
+        location: "Dataran Putrajaya",
+        distances: ["42K", "21K", "10K", "5K"],
+        status: "Open",
+        registrationPortal: "CheckpointSpot",
+        registrationUrl: "https://checkpointspot.asia",
+        apparel: {
+          partner: "adidas",
+          tier: "GLOBAL",
+          tierLabel: "Global Athletic Partner (adidas)",
+          rating: 4.8,
+          fabric: "adidas AEROREADY moisture-wicking weave",
+          cut: "Signature adidas 3-Stripes Athletic Taper",
+          clutterScore: "Very Clean (Restricted corporate placement)",
+          description: "Official adidas running tee with authentic badge of sport. Premium handfeel and high durability across wash cycles."
+        }
+      },
+      {
+        id: "score-2027",
+        name: "SCORE Marathon 2027",
+        edition: "Annual Putrajaya Edition",
+        organizer: "SCORE Sports / AIA",
+        date: "2027-06-13",
+        dateDisplay: "12 – 13 June 2027",
+        year: 2027,
+        region: "Putrajaya",
+        location: "Dataran Putrajaya",
+        distances: ["42K", "21K", "10K", "5K"],
+        status: "Upcoming",
+        registrationPortal: "CheckpointSpot",
+        registrationUrl: "https://checkpointspot.asia",
+        apparel: {
+          partner: "adidas",
+          tier: "GLOBAL",
+          tierLabel: "Global Athletic Partner (adidas)",
+          rating: 4.8,
+          fabric: "adidas AEROREADY Performance Poly",
+          cut: "Authentic Athletic Cut",
+          clutterScore: "Very Clean",
+          description: "Consistently one of the top value race entries solely for the genuine adidas race pack & finisher jersey."
+        }
+      },
+      {
+        id: "boom-bendang-2026",
+        name: "QRC BOOM Bendang Half Marathon 2026",
+        edition: "Penang Edition",
+        organizer: "Quick Release Crew (QRC) & BOOM",
+        date: "2026-07-12",
+        dateDisplay: "12 July 2026",
+        year: 2026,
+        region: "Penang",
+        location: "Balik Pulau, Penang",
+        distances: ["21K", "10K", "5K"],
+        status: "Open",
+        registrationPortal: "CheckpointSpot",
+        registrationUrl: "https://checkpointspot.asia",
+        apparel: {
+          partner: "BOOM Street-Cut Studio",
+          tier: "STREET",
+          tierLabel: "Minimalist Streetwear / Run Crew",
+          rating: 4.7,
+          fabric: "Boutique Matte-Finish Lightweight Poly Blend",
+          cut: "Modern Boxy / Street Running Drop-Shoulder",
+          clutterScore: "Minimalist (Boutique typographic print)",
+          description: "Designed like modern lifestyle running apparel (comparable to Bandit / Satisfy aesthetic). No obnoxious sponsor banners."
+        }
+      },
+      {
+        id: "boom-plus-2026",
+        name: "BOOM+ Kahf Putrajaya 30km / HM 2026",
+        edition: "Putrajaya City Run",
+        organizer: "BOOM+ & Kahf",
+        date: "2026-09-13",
+        dateDisplay: "12 – 13 September 2026",
+        year: 2026,
+        region: "Putrajaya",
+        location: "Dataran Putrajaya",
+        distances: ["42K", "21K", "10K", "5K"],
+        status: "Upcoming",
+        registrationPortal: "RaceXasia",
+        registrationUrl: "https://www.racexasia.com",
+        apparel: {
+          partner: "BOOM+ Apparel Lab",
+          tier: "STREET",
+          tierLabel: "Minimalist Streetwear / Run Crew",
+          rating: 4.6,
+          fabric: "Breathable Micro-perforated Honeycomb",
+          cut: "Relaxed Urban Runner Fit",
+          clutterScore: "Clean (Monochrome tone-on-tone branding)",
+          description: "Renowned among urban run clubs for stylish colorways (earth tones, charcoal, muted sage) rather than garish neon gradients."
+        }
+      },
+      {
+        id: "pbim-2026",
+        name: "Penang Bridge International Marathon (PBIM) 2026",
+        edition: "Historic Bridge Crossing",
+        organizer: "Penang State Tourism & PBIM",
+        date: "2026-12-13",
+        dateDisplay: "13 December 2026",
+        year: 2026,
+        region: "Penang",
+        location: "Penang Bridge / Queensbay",
+        distances: ["42K", "21K", "10K"],
+        status: "Upcoming",
+        registrationPortal: "Official / PBIM",
+        registrationUrl: "https://www.penangmarathon.gov.my",
+        apparel: {
+          partner: "Brooks / Regional Partner",
+          tier: "GLOBAL",
+          tierLabel: "Major Brand Partner / Prestige",
+          rating: 4.4,
+          fabric: "High-Gauge Hydrophilic Knit",
+          cut: "Classic Athletic Unisex",
+          clutterScore: "Balanced (Iconic bridge graphic silhouette)",
+          description: "Iconic collector tee for completing the grueling 21.1K or 42K across the bridge in coastal sea breeze conditions."
+        }
+      },
+      {
+        id: "pbim-2027",
+        name: "Penang Bridge International Marathon (PBIM) 2027",
+        edition: "Historic Bridge Crossing",
+        organizer: "Penang State Tourism & PBIM",
+        date: "2027-12-12",
+        dateDisplay: "12 December 2027",
+        year: 2027,
+        region: "Penang",
+        location: "Penang Bridge",
+        distances: ["42K", "21K", "10K"],
+        status: "Upcoming",
+        registrationPortal: "Official / PBIM",
+        registrationUrl: "https://www.penangmarathon.gov.my",
+        apparel: {
+          partner: "Official Technical Sponsor",
+          tier: "GLOBAL",
+          tierLabel: "Major Brand Partner / Prestige",
+          rating: 4.4,
+          fabric: "Quick-Dry Anti-Chafe Mesh",
+          cut: "Classic Performance Fit",
+          clutterScore: "Moderate",
+          description: "Night/early dawn race favorite across one of Southeast Asia's longest bridges."
+        }
+      },
+      {
+        id: "selmar-2026",
+        name: "Selangor Marathon (SELMAR) 2026",
+        edition: "State Championship",
+        organizer: "Selangor Athletics & CheckpointSpot",
+        date: "2026-08-23",
+        dateDisplay: "23 August 2026",
+        year: 2026,
+        region: "Selangor",
+        location: "Shah Alam, Selangor",
+        distances: ["42K", "21K", "10K", "5K"],
+        status: "Open",
+        registrationPortal: "CheckpointSpot",
+        registrationUrl: "https://checkpointspot.asia",
+        apparel: {
+          partner: "Puma / Local Partner",
+          tier: "GLOBAL",
+          tierLabel: "Global Athletic Partner",
+          rating: 4.5,
+          fabric: "Silky Poly-Spandex Blend",
+          cut: "Fitted Athletic",
+          clutterScore: "Clean",
+          description: "Fast, flat highway course through Shah Alam with high-visibility safety reflective trims on the back."
+        }
+      },
+      {
+        id: "cybercity-hm-2026",
+        name: "Cybercity Half Marathon 2026",
+        edition: "Cyberjaya Tech Run",
+        organizer: "JomRun Events",
+        date: "2026-05-17",
+        dateDisplay: "17 May 2026",
+        year: 2026,
+        region: "Selangor",
+        location: "Cyberjaya, Selangor",
+        distances: ["21K", "10K", "5K"],
+        status: "Open",
+        registrationPortal: "JomRun",
+        registrationUrl: "https://www.jomrun.com",
+        apparel: {
+          partner: "JomRun Pro Wear",
+          tier: "CUSTOM",
+          tierLabel: "Custom Graphic Sublimation",
+          rating: 4.1,
+          fabric: "Lightweight Cool-Weave",
+          cut: "Regular Cut",
+          clutterScore: "Moderate-High (Event sponsors included)",
+          description: "Widely attended early season tune-up half marathon on wide cyber-boulevards."
+        }
+      },
+      {
+        id: "borneo-marathon-2026",
+        name: "Borneo International Marathon 2026",
+        edition: "16th Edition",
+        organizer: "Kinabalu Running Club",
+        date: "2026-04-26",
+        dateDisplay: "26 April 2026",
+        year: 2026,
+        region: "Borneo",
+        location: "Likas Stadium, Kota Kinabalu, Sabah",
+        distances: ["42K", "21K", "10K"],
+        status: "Open",
+        registrationPortal: "RaceXasia",
+        registrationUrl: "https://www.racexasia.com",
+        apparel: {
+          partner: "Boutique Borneo Design",
+          tier: "STREET",
+          tierLabel: "Cultural Minimalist Design",
+          rating: 4.6,
+          fabric: "Subtle Ethnic Motif Micro-Pique",
+          cut: "Athletic Standard",
+          clutterScore: "Clean (Traditional motifs integrated)",
+          description: "Celebrated for beautiful coastal Sabah sunrise routes and tasteful Sabahan indigenous graphic motifs."
+        }
+      },
+      {
+        id: "putrajaya-night-2026",
+        name: "Putrajaya Night Run 2026",
+        edition: "Neon Night Edition",
+        organizer: "BiiB Running",
+        date: "2026-11-21",
+        dateDisplay: "21 November 2026",
+        year: 2026,
+        region: "Putrajaya",
+        location: "Kompleks Perbadanan Putrajaya",
+        distances: ["21K", "10K", "5K"],
+        status: "Upcoming",
+        registrationPortal: "BiiB / HeyRunner",
+        registrationUrl: "https://getbiib.com",
+        apparel: {
+          partner: "BiiB Reflex Tech",
+          tier: "CUSTOM",
+          tierLabel: "Custom Glow Sublimation",
+          rating: 4.3,
+          fabric: "Fluorescent Micro-perforated",
+          cut: "Breathable Night Racing Cut",
+          clutterScore: "Moderate",
+          description: "High-luminescence neon elements optimized for nighttime bridge running under Putrajaya illumination."
+        }
+      }
+    ];
+
+    // STATE MANAGEMENT
+    let activeFilters = {
+      search: "",
+      year: "ALL",
+      dist: "ALL",
+      tier: "ALL",
+      region: "ALL"
+    };
+
+    // User's Target Season (persisted to localStorage)
+    let mySeason = JSON.parse(localStorage.getItem("larihub_my_season") || "[]");
+
+    // DOM ELEMENTS
+    const raceGrid = document.getElementById("raceGrid");
+    const emptyState = document.getElementById("emptyState");
+    const searchInput = document.getElementById("searchInput");
+    const regionSelect = document.getElementById("regionSelect");
+    const filteredCountBadge = document.getElementById("filteredCountBadge");
+    const activeRaceCount = document.getElementById("activeRaceCount");
+    const savedRacesBadge = document.getElementById("savedRacesBadge");
+    const seasonModal = document.getElementById("seasonModal");
+    const seasonListContainer = document.getElementById("seasonListContainer");
+    const toast = document.getElementById("toast");
+    const toastMsg = document.getElementById("toastMsg");
+
+    // HELPER: Days countdown calculation
+    function getDaysUntil(dateString) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const raceDate = new Date(dateString);
+      const diffTime = raceDate - today;
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      return diffDays;
+    }
+
+    // HELPER: Format Pace for Goal Time
+    function calculatePace(goalTimeStr, distanceStr) {
+      if (!goalTimeStr) return "Target not set";
+      
+      const parts = goalTimeStr.split(":").map(Number);
+      let totalMinutes = 0;
+      if (parts.length === 2) {
+        totalMinutes = parts[0] * 60 + parts[1]; // HH:MM
+      } else if (parts.length === 3) {
+        totalMinutes = parts[0] * 60 + parts[1] + (parts[2] / 60);
+      } else {
+        return "Invalid time";
+      }
+
+      let km = 21.0975; // default HM
+      if (distanceStr.includes("42")) km = 42.195;
+      if (distanceStr.includes("10")) km = 10.0;
+      if (distanceStr.includes("5")) km = 5.0;
+
+      const pacePerKm = totalMinutes / km;
+      const paceMin = Math.floor(pacePerKm);
+      const paceSec = Math.round((pacePerKm - paceMin) * 60);
+      return `${paceMin}:${paceSec < 10 ? '0' : ''}${paceSec} /km`;
+    }
+
+    // TOAST NOTIFIER
+    function showToast(message) {
+      toastMsg.textContent = message;
+      toast.classList.remove("translate-y-20", "opacity-0");
+      toast.classList.add("translate-y-0", "opacity-100");
+      setTimeout(() => {
+        toast.classList.add("translate-y-20", "opacity-0");
+        toast.classList.remove("translate-y-0", "opacity-100");
+      }, 3000);
+    }
+
+    // RENDER STAR RATING
+    function renderStars(rating) {
+      let starsHtml = "";
+      const full = Math.floor(rating);
+      for (let i = 0; i < full; i++) {
+        starsHtml += `<i class="fa-solid fa-star text-amber-400"></i>`;
+      }
+      if (rating % 1 !== 0) {
+        starsHtml += `<i class="fa-solid fa-star-half-stroke text-amber-400"></i>`;
+      }
+      return starsHtml;
+    }
+
+    // APPAREL TIER BADGE GENERATOR
+    function getTierBadge(tier, label) {
+      if (tier === "GLOBAL") {
+        return `
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-400/10 border border-amber-400/30 text-amber-300">
+            <i class="fa-solid fa-award text-amber-400"></i> ${label}
+          </span>
+        `;
+      } else if (tier === "STREET") {
+        return `
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-purple-500/10 border border-purple-500/30 text-purple-300">
+            <i class="fa-solid fa-fire text-purple-400"></i> ${label}
+          </span>
+        `;
+      } else {
+        return `
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-500/10 border border-blue-500/30 text-blue-300">
+            <i class="fa-solid fa-palette text-blue-400"></i> ${label}
+          </span>
+        `;
+      }
+    }
+
+    // RENDER CARDS
+    function renderRaces() {
+      const filtered = RACES.filter(race => {
+        // Search
+        const searchMatches = 
+          race.name.toLowerCase().includes(activeFilters.search.toLowerCase()) ||
+          race.location.toLowerCase().includes(activeFilters.search.toLowerCase()) ||
+          race.organizer.toLowerCase().includes(activeFilters.search.toLowerCase()) ||
+          race.apparel.partner.toLowerCase().includes(activeFilters.search.toLowerCase());
+
+        // Year
+        const yearMatches = activeFilters.year === "ALL" || race.year.toString() === activeFilters.year;
+
+        // Distance
+        const distMatches = activeFilters.dist === "ALL" || race.distances.includes(activeFilters.dist);
+
+        // Tier
+        const tierMatches = activeFilters.tier === "ALL" || race.apparel.tier === activeFilters.tier;
+
+        // Region
+        const regionMatches = activeFilters.region === "ALL" || race.region === activeFilters.region;
+
+        return searchMatches && yearMatches && distMatches && tierMatches && regionMatches;
+      });
+
+      filteredCountBadge.textContent = `${filtered.length} races found`;
+      activeRaceCount.textContent = `${RACES.length} Races Indexed`;
+
+      if (filtered.length === 0) {
+        raceGrid.innerHTML = "";
+        emptyState.classList.remove("hidden");
+        return;
+      }
+
+      emptyState.classList.add("hidden");
+
+      raceGrid.innerHTML = filtered.map(race => {
+        const isSaved = mySeason.some(item => item.id === race.id);
+        const days = getDaysUntil(race.date);
+        let countdownBadge = "";
+        if (days > 0) {
+          countdownBadge = `<span class="text-xs font-mono px-2 py-0.5 rounded bg-brand-dark/80 text-brand-lime border border-brand-lime/20 font-bold">${days}d until race</span>`;
+        } else if (days === 0) {
+          countdownBadge = `<span class="text-xs font-mono px-2 py-0.5 rounded bg-emerald-500 text-black font-bold">Race Day Today!</span>`;
+        } else {
+          countdownBadge = `<span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">Completed</span>`;
+        }
+
+        return `
+          <div class="bg-brand-card border border-brand-cardBorder hover:border-slate-600 rounded-2xl p-5 flex flex-col justify-between transition-all duration-200 hover:-translate-y-1 shadow-lg group relative">
+            
+            <!-- Top Bar: Location & Bookmark -->
+            <div>
+              <div class="flex items-start justify-between gap-2 mb-2">
+                <div class="flex items-center gap-2">
+                  <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                    <i class="fa-solid fa-location-dot text-brand-lime"></i> ${race.location}
+                  </span>
+                  <span class="text-slate-600">•</span>
+                  <span class="text-[11px] text-slate-400 font-mono">${race.year}</span>
+                </div>
+                <button 
+                  onclick="toggleSaveRace('${race.id}')"
+                  class="p-2 rounded-xl text-lg transition ${isSaved ? 'text-amber-400 bg-amber-400/10' : 'text-slate-500 hover:text-white bg-slate-800/40'}"
+                  title="${isSaved ? 'Remove from My Season' : 'Bookmark to My Target Season'}"
+                >
+                  <i class="${isSaved ? 'fa-solid' : 'fa-regular'} fa-star"></i>
+                </button>
+              </div>
+
+              <!-- Race Title -->
+              <h3 class="text-lg font-black text-white group-hover:text-brand-lime transition-colors leading-snug">
+                ${race.name}
+              </h3>
+              
+              <!-- Date & Countdown -->
+              <div class="flex items-center gap-2 mt-2 flex-wrap">
+                <span class="text-xs text-slate-300 font-medium">
+                  <i class="fa-regular fa-calendar-days text-slate-500 mr-1"></i> ${race.dateDisplay}
+                </span>
+                ${countdownBadge}
+              </div>
+
+              <!-- Available Distances Chips -->
+              <div class="flex flex-wrap gap-1 mt-3">
+                ${race.distances.map(d => `
+                  <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-[#0b0e12] border border-brand-cardBorder text-slate-300 font-semibold">
+                    ${d}
+                  </span>
+                `).join('')}
+              </div>
+
+              <!-- APPAREL TEES INSPECTOR (Key Differentiator) -->
+              <div class="mt-4 pt-4 border-t border-brand-cardBorder/80 bg-[#12161d] -mx-5 -mb-2 p-4 rounded-b-xl space-y-2.5">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-1.5 text-xs font-bold text-white">
+                    <i class="fa-solid fa-shirt text-brand-lime"></i>
+                    <span>Official Apparel: <span class="text-brand-lime">${race.apparel.partner}</span></span>
+                  </div>
+                  <div class="flex items-center gap-1 text-xs">
+                    ${renderStars(race.apparel.rating)}
+                    <span class="text-[10px] text-slate-400 font-bold ml-1">${race.apparel.rating}</span>
+                  </div>
+                </div>
+
+                <!-- Tier Badge -->
+                <div>
+                  ${getTierBadge(race.apparel.tier, race.apparel.tierLabel)}
+                </div>
+
+                <!-- Apparel Details Specs -->
+                <p class="text-xs text-slate-300 line-clamp-2 leading-relaxed">
+                  ${race.apparel.description}
+                </p>
+
+                <div class="grid grid-cols-2 gap-2 text-[10px] text-slate-400 pt-1 font-mono">
+                  <div><span class="text-slate-500">Cut:</span> ${race.apparel.cut}</div>
+                  <div><span class="text-slate-500">Fabric:</span> ${race.apparel.fabric}</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Footer: Register Link & Direct Portal -->
+            <div class="mt-6 pt-3 flex items-center justify-between gap-3">
+              <div class="text-[11px] text-slate-400 flex items-center gap-1">
+                <i class="fa-solid fa-ticket text-slate-500"></i>
+                <span>via <strong class="text-slate-200">${race.registrationPortal}</strong></span>
+              </div>
+              <a 
+                href="${race.registrationUrl}" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                class="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-brand-lime hover:bg-lime-300 text-black flex items-center gap-1.5 transition shadow-md shadow-brand-lime/10"
+              >
+                <span>Register / Info</span>
+                <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+              </a>
+            </div>
+
+          </div>
+        `;
+      }).join('');
+    }
+
+    // TOGGLE SAVE TO MY SEASON
+    window.toggleSaveRace = function(raceId) {
+      const existingIndex = mySeason.findIndex(item => item.id === raceId);
+      const raceObj = RACES.find(r => r.id === raceId);
+
+      if (existingIndex > -1) {
+        mySeason.splice(existingIndex, 1);
+        showToast(`Removed "${raceObj.name}" from your season`);
+      } else {
+        mySeason.push({
+          id: raceObj.id,
+          name: raceObj.name,
+          dateDisplay: raceObj.dateDisplay,
+          date: raceObj.date,
+          targetDistance: raceObj.distances[1] || raceObj.distances[0], // default 21K or first
+          targetTime: "2:26:00", // Pre-populated with user's sub-2:30 HM realm
+          notes: "Focus on tall hips & 170+ spm cadence"
+        });
+        showToast(`Added "${raceObj.name}" to My Season Planner`);
+      }
+
+      localStorage.setItem("larihub_my_season", JSON.stringify(mySeason));
+      updateSavedBadge();
+      renderRaces();
+      renderSeasonPlanner();
+    };
+
+    function updateSavedBadge() {
+      savedRacesBadge.textContent = mySeason.length;
+    }
+
+    // RENDER SEASON PLANNER MODAL
+    function renderSeasonPlanner() {
+      if (mySeason.length === 0) {
+        seasonListContainer.innerHTML = `
+          <div class="text-center py-12 text-slate-400">
+            <i class="fa-regular fa-calendar-xmark text-4xl mb-3 text-slate-600"></i>
+            <h4 class="font-bold text-white text-sm">No target races saved yet</h4>
+            <p class="text-xs mt-1">Star events on the main calendar to organize your 2026/2027 pacing targets.</p>
+          </div>
+        `;
+        return;
+      }
+
+      seasonListContainer.innerHTML = mySeason.map((item, index) => {
+        const pace = calculatePace(item.targetTime, item.targetDistance);
+        const days = getDaysUntil(item.date);
+
+        return `
+          <div class="bg-[#161c24] border border-brand-cardBorder rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div class="space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-mono text-brand-lime font-bold">${item.dateDisplay}</span>
+                <span class="text-xs px-2 py-0.5 rounded bg-brand-dark text-slate-300 font-mono border border-slate-700">${days}d to go</span>
+              </div>
+              <h4 class="font-bold text-white text-sm leading-tight">${item.name}</h4>
+              <p class="text-xs text-slate-400 font-mono">
+                Pacing requirement: <strong class="text-amber-300">${pace}</strong>
+              </p>
+            </div>
+
+            <!-- Inputs: Target Distance & Target Time -->
+            <div class="flex flex-wrap items-center gap-2">
+              <div>
+                <label class="block text-[10px] text-slate-400 uppercase font-semibold">Distance</label>
+                <input 
+                  type="text" 
+                  value="${item.targetDistance}" 
+                  onchange="updateSeasonItem(${index}, 'targetDistance', this.value)"
+                  class="w-16 bg-[#0b0e12] border border-brand-cardBorder text-slate-100 text-xs rounded-lg px-2 py-1 font-mono focus:border-brand-lime focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label class="block text-[10px] text-slate-400 uppercase font-semibold">Target Time (H:MM)</label>
+                <input 
+                  type="text" 
+                  value="${item.targetTime}" 
+                  onchange="updateSeasonItem(${index}, 'targetTime', this.value)"
+                  placeholder="2:15:00"
+                  class="w-24 bg-[#0b0e12] border border-brand-cardBorder text-slate-100 text-xs rounded-lg px-2 py-1 font-mono focus:border-brand-lime focus:outline-none"
+                />
+              </div>
+
+              <div class="self-end">
+                <button 
+                  onclick="removeSeasonItem(${index})"
+                  class="p-1.5 text-slate-400 hover:text-rose-400 transition"
+                  title="Remove from season"
+                >
+                  <i class="fa-regular fa-trash-can text-sm"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // UPDATE ITEM IN SEASON
+    window.updateSeasonItem = function(index, field, value) {
+      mySeason[index][field] = value;
+      localStorage.setItem("larihub_my_season", JSON.stringify(mySeason));
+      renderSeasonPlanner();
+    };
+
+    window.removeSeasonItem = function(index) {
+      mySeason.splice(index, 1);
+      localStorage.setItem("larihub_my_season", JSON.stringify(mySeason));
+      updateSavedBadge();
+      renderRaces();
+      renderSeasonPlanner();
+      showToast("Race removed from Season");
+    };
+
+    // COPY SEASON PLAN TO CLIPBOARD
+    document.getElementById("copySeasonBtn").addEventListener("click", () => {
+      if (mySeason.length === 0) {
+        showToast("No races saved to copy.");
+        return;
+      }
+
+      let exportText = "🏃 MY MALAYSIA RACE SEASON TARGETS (via LariHub MY):\n\n";
+      mySeason.forEach((r, idx) => {
+        const pace = calculatePace(r.targetTime, r.targetDistance);
+        exportText += `${idx + 1}. ${r.name} (${r.dateDisplay})\n`;
+        exportText += `   Distance: ${r.targetDistance} | Goal: ${r.targetTime} (${pace})\n\n`;
+      });
+
+      navigator.clipboard.writeText(exportText).then(() => {
+        showToast("Season plan copied to clipboard!");
+      });
+    });
+
+    document.getElementById("clearSeasonBtn").addEventListener("click", () => {
+      if (mySeason.length === 0) return;
+      mySeason = [];
+      localStorage.setItem("larihub_my_season", "[]");
+      updateSavedBadge();
+      renderRaces();
+      renderSeasonPlanner();
+      showToast("Cleared target season");
+    });
+
+    // EVENT LISTENERS: FILTERS
+    searchInput.addEventListener("input", (e) => {
+      activeFilters.search = e.target.value;
+      renderRaces();
+    });
+
+    regionSelect.addEventListener("change", (e) => {
+      activeFilters.region = e.target.value;
+      renderRaces();
+    });
+
+    // Year Filter buttons
+    document.querySelectorAll(".year-filter-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".year-filter-btn").forEach(b => {
+          b.classList.remove("bg-brand-lime", "text-black");
+          b.classList.add("text-slate-400");
+        });
+        btn.classList.add("bg-brand-lime", "text-black");
+        btn.classList.remove("text-slate-400");
+        activeFilters.year = btn.dataset.year;
+        renderRaces();
+      });
+    });
+
+    // Distance Filter buttons
+    document.querySelectorAll(".dist-filter-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".dist-filter-btn").forEach(b => {
+          b.classList.remove("bg-brand-lime", "text-black", "font-bold");
+          b.classList.add("bg-[#0b0e12]", "text-slate-300");
+        });
+        btn.classList.add("bg-brand-lime", "text-black", "font-bold");
+        btn.classList.remove("bg-[#0b0e12]", "text-slate-300");
+        activeFilters.dist = btn.dataset.dist;
+        renderRaces();
+      });
+    });
+
+    // Tier Filter buttons
+    document.querySelectorAll(".tier-filter-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tier-filter-btn").forEach(b => {
+          b.classList.remove("bg-brand-lime", "text-black", "font-bold");
+          b.classList.add("bg-[#0b0e12]", "text-slate-300");
+        });
+        btn.classList.add("bg-brand-lime", "text-black", "font-bold");
+        btn.classList.remove("bg-[#0b0e12]", "text-slate-300");
+        activeFilters.tier = btn.dataset.tier;
+        renderRaces();
+      });
+    });
+
+    // Reset All Filters
+    document.getElementById("resetFiltersBtn").addEventListener("click", () => {
+      activeFilters = { search: "", year: "ALL", dist: "ALL", tier: "ALL", region: "ALL" };
+      searchInput.value = "";
+      regionSelect.value = "ALL";
+      // reset pills
+      document.querySelector('[data-year="ALL"]').click();
+      document.querySelector('[data-dist="ALL"]').click();
+      document.querySelector('[data-tier="ALL"]').click();
+    });
+
+    // MODAL TOGGLES
+    const seasonPlannerBtn = document.getElementById("seasonPlannerBtn");
+    const closeSeasonModalBtn = document.getElementById("closeSeasonModalBtn");
+    seasonPlannerBtn.addEventListener("click", () => {
+      renderSeasonPlanner();
+      seasonModal.classList.remove("hidden");
+    });
+    closeSeasonModalBtn.addEventListener("click", () => {
+      seasonModal.classList.add("hidden");
+    });
+
+    const infoModalBtn = document.getElementById("infoModalBtn");
+    const infoModal = document.getElementById("infoModal");
+    const closeInfoModalBtn = document.getElementById("closeInfoModalBtn");
+    const closeInfoModalBtn2 = document.getElementById("closeInfoModalBtn2");
+    infoModalBtn.addEventListener("click", () => infoModal.classList.remove("hidden"));
+    closeInfoModalBtn.addEventListener("click", () => infoModal.classList.add("hidden"));
+    closeInfoModalBtn2.addEventListener("click", () => infoModal.classList.add("hidden"));
+
+    // Close on backdrop click
+    window.addEventListener("click", (e) => {
+      if (e.target === seasonModal) seasonModal.classList.add("hidden");
+      if (e.target === infoModal) infoModal.classList.add("hidden");
+    });
+
+    // INITIAL MOUNT
+    updateSavedBadge();
+    renderRaces();
+  </script>
+</body>
+</html>

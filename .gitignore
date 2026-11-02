@@ -1,0 +1,13 @@
+# Ignore credentials, node_modules, and runtime data
+.env
+node_modules/
+data/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+logs/
