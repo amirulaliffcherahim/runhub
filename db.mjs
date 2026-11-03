@@ -195,11 +195,51 @@ const parseRow = (row) => {
  * Idempotent: re-running refreshes `updated_at` and never duplicates rows.
  * Children are replaced wholesale so a re-sync cannot accumulate stale rows.
  */
-export async function saveEvent(db, event) {
+/**
+ * Run `fn` inside one transaction and hand it a query interface.
+ * Used to publish a whole sync atomically: readers keep seeing the previous
+ * committed snapshot until COMMIT, so the UI never shows a half-updated catalogue.
+ */
+export async function withTransaction(db, fn) {
   const client = await db.pool.connect();
+  const tx = {
+    query: (text, params) => client.query(text, params),
+    __tx: true,
+  };
   try {
     await client.query("BEGIN");
+    const out = await fn(tx);
+    await client.query("COMMIT");
+    return out;
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
 
+export async function saveEvent(db, event) {
+  // Already inside a transaction (publish phase): do not nest BEGIN/COMMIT.
+  if (db.__tx) return saveEventInner(db, event);
+
+  const client = await db.pool.connect();
+  const scoped = { query: (t, p) => client.query(t, p), __tx: true };
+  try {
+    await client.query("BEGIN");
+    const id = await saveEventInner(scoped, event);
+    await client.query("COMMIT");
+    return id;
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function saveEventInner(client, event) {
+  {
     // Stable id: a known source URL wins, so a richer portal appearing later
     // updates the existing row instead of spawning a duplicate.
     let id = event.id;
@@ -289,13 +329,7 @@ export async function saveEvent(db, event) {
       );
     }
 
-    await client.query("COMMIT");
     return id;
-  } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw e;
-  } finally {
-    client.release();
   }
 }
 

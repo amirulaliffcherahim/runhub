@@ -195,3 +195,60 @@ test("isRunning drops non-running listings", () => {
     assert.ok(!isRunning({ title }), `${title} must be dropped`);
   }
 });
+
+// ---------- atomic publish: the UI never sees a half-written catalogue ----------
+test("a failure during the publish phase leaves the previous data untouched", { skip }, () =>
+  withDb(async (db) => {
+    // First good sync.
+    await runSync({ db, quiet: true, scrapers: [["howei", stub([ev({ title: "Alpha Kept Run 2099" })])]] });
+    assert.equal(await count(db, "SELECT count(*)::int c FROM events"), 1);
+
+    // Second sync: force a genuine mid-write failure on the SECOND event, after the
+    // first has already been inserted inside the transaction.
+    await db.query("ALTER TABLE categories ADD CONSTRAINT chk_test_sane_km CHECK (distance_km < 1000)");
+    const good = ev({ id: "new", title: "Bravo New Run 2099", sources: [{ portal: "howei", source_url: "https://howei.com/event_details/new" }] });
+    const bad = ev({
+      id: "boom",
+      title: "Charlie Boom Run 2099",
+      categories: [{ distance_km: 5000, label: "silly" }],
+      sources: [{ portal: "howei", source_url: "https://howei.com/event_details/boom" }],
+    });
+    await assert.rejects(runSync({ db, quiet: true, scrapers: [["howei", stub([good, bad])]] }), /chk_test_sane_km|violates/i);
+
+    // Nothing from the failed run is visible: no partial write, no archive flip.
+    const rows = (await db.query("SELECT id, archived_at FROM events ORDER BY id")).rows;
+    assert.deepEqual(rows.map((r) => r.id), ["e1"], "the good run's event is the only row");
+    assert.equal(rows[0].archived_at, null);
+  }));
+
+test("the run row is still closed when the publish phase fails", { skip }, () =>
+  withDb(async (db) => {
+    await db.query("ALTER TABLE categories ADD CONSTRAINT chk_test_sane_km2 CHECK (distance_km < 1000)");
+    const bad = ev({ id: "boom", title: "Charlie Boom Run 2099", categories: [{ distance_km: 5000 }], sources: [{ portal: "howei", source_url: "https://howei.com/event_details/boom" }] });
+    await assert.rejects(runSync({ db, quiet: true, scrapers: [["howei", stub([bad])]] }), /chk_test_sane_km2|violates/i);
+    const run = (await db.query("SELECT status, finished_at, errors FROM sync_runs ORDER BY id DESC LIMIT 1")).rows[0];
+    assert.equal(run.status, "failed");
+    assert.ok(run.finished_at, "a crashed run is never left open");
+    assert.match(run.errors, /violates|null value/i);
+  }));
+
+test("crawling does not touch event data until publish", { skip }, () =>
+  withDb(async (db) => {
+    await runSync({ db, quiet: true, scrapers: [["howei", stub([ev({ title: "Alpha Prior Run 2099" })])]] });
+    const before = (await db.query("SELECT updated_at FROM events")).rows[0].updated_at;
+
+    // A scraper that inspects the DB mid-crawl: it must still see the old snapshot.
+    let seenDuringCrawl = null;
+    const spy = async () => {
+      seenDuringCrawl = (await db.query("SELECT count(*)::int c FROM events")).rows[0].c;
+      return { events: [ev({ id: "later", title: "Bravo Later Run 2099", sources: [{ portal: "howei", source_url: "https://howei.com/event_details/later" }] })], errors: [] };
+    };
+    await runSync({ db, quiet: true, skipArchive: true, scrapers: [["howei", spy]] });
+    assert.equal(seenDuringCrawl, 1, "mid-crawl the UI still sees only the previous dataset");
+
+    const after = (await db.query("SELECT count(*)::int c FROM events")).rows[0].c;
+    assert.equal(after, 2, "after commit both are present");
+    const stillThere = (await db.query("SELECT count(*)::int c FROM events WHERE title = $1", ["Alpha Prior Run 2099"])).rows[0].c;
+    assert.equal(stillThere, 1);
+    assert.ok(before);
+  }));

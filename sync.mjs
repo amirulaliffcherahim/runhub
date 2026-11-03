@@ -13,7 +13,7 @@
  */
 import { pathToFileURL } from "node:url";
 import {
-  openDb, saveEvent, archiveExpired, archiveStale,
+  openDb, saveEvent, archiveExpired, archiveStale, withTransaction,
   startSyncRun, recordPortalRun, finishSyncRun,
 } from "./db.mjs";
 import { dedupe } from "./scrapers/normalizer.mjs";
@@ -119,30 +119,26 @@ export async function runSync({ db, dbPath, log = console.log, quiet = false, sc
     }
 
     const merged = dedupe(usable);
-    const savedIds = [];
-    for (const ev of merged) {
-      try {
-        savedIds.push(await saveEvent(conn, ev));
-      } catch (e) {
-        errors.push(`save ${ev.id}: ${e.message}`);
-      }
-    }
 
-    // Nothing is deleted: stale rows are archived (kept in Postgres, hidden from the UI).
+    // ---- publish phase -------------------------------------------------------
+    // Everything the UI reads is written inside ONE transaction. The crawl above
+    // can take 18 minutes; until this commits, readers keep seeing the previous
+    // complete snapshot, and a failure here leaves the old data untouched.
+    const publishStarted = Date.now();
+    const savedIds = [];
     let archivedDate = 0;
     let archivedStale = 0;
-    if (!skipArchive) {
-      try {
-        archivedDate = await archiveExpired(conn);
-      } catch (e) {
-        errors.push(`archive date: ${e.message}`);
+
+    await withTransaction(conn, async (tx) => {
+      for (const ev of merged) savedIds.push(await saveEvent(tx, ev));
+
+      // Nothing is deleted: stale rows are archived (kept in Postgres, hidden from the UI).
+      if (!skipArchive) {
+        archivedDate = await archiveExpired(tx);
+        archivedStale = await archiveStale(tx, { seenIds: savedIds, portalsRun });
       }
-      try {
-        archivedStale = await archiveStale(conn, { seenIds: savedIds, portalsRun });
-      } catch (e) {
-        errors.push(`archive stale: ${e.message}`);
-      }
-    }
+    });
+    say(`  published ${merged.length} events in ${Date.now() - publishStarted}ms (single transaction)`);
 
     const http = throttleReport();
     say(`  http: ${http.requests} requests across ${http.hosts} hosts in ${http.seconds}s`);
