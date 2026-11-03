@@ -157,12 +157,20 @@
   .tag.new { background: var(--accent); color: #fff; }
   .tag.closed { background: #334155; color: #cbd5e1; }
   .tag.soldout { background: #b91c1c; color: #fff; }
+  .tag.eb { background: #0f766e; color: #d1fae5; }
+  .cardrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .dist b { color: var(--lime); font-weight: 700; }
+  .kit { display: flex; gap: 4px; flex-shrink: 0; }
+  .kit img {
+    width: 34px; height: 34px; object-fit: cover; border-radius: 6px;
+    border: 1px solid var(--border); background: #0b0e12;
+  }
   .card .body { padding: 13px 14px 0; flex: 1; }
   .card h4 { margin: 0 0 6px; font-size: 15px; line-height: 1.3; font-weight: 800; }
   .meta { font-size: 11.5px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .countdown { font-family: var(--mono); font-size: 11px; color: var(--lime); }
   .countdown.soon { color: var(--accent); }
-  .distances { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 9px; }
+  .distances { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 9px; min-width: 0; }
   .dist {
     font-family: var(--mono); font-size: 11px; font-weight: 700;
     background: var(--bg); border: 1px solid var(--border); color: #c3cfdd;
@@ -459,6 +467,43 @@ const tierOf = (ev) => {
 
 const isNew = (ev) => state.lastVisit > 0 && Date.parse(ev.first_seen_at ?? 0) > state.lastVisit;
 
+/** Cheapest normal price per distance, for the "21K - RM85" chips. */
+const priceByDistance = (ev) => {
+  const out = new Map();
+  for (const c of ev.categories ?? []) {
+    if (c.distance_km == null) continue;
+    const p = c.price_normal ?? c.price_early;
+    const km = Math.round(c.distance_km);
+    if (p == null) {
+      if (!out.has(km)) out.set(km, null);
+      continue;
+    }
+    const cur = out.get(km);
+    if (cur == null || p < cur) out.set(km, p);
+  }
+  return [...out.entries()].sort((a, b) => a[0] - b[0]);
+};
+
+/** Soonest early-bird cut-off still in the future, with days remaining. */
+const earlyBird = (ev) => {
+  const dates = (ev.categories ?? [])
+    .map((c) => c.early_bird_ends)
+    .filter(Boolean)
+    .sort();
+  if (!dates.length) return null;
+  const d = daysUntil(dates[0]);
+  return d != null && d >= 0 ? { date: dates[0], days: d } : null;
+};
+
+/** Up to `n` kit images for the card, tee first. */
+const kitThumbs = (ev, n = 2) => {
+  const order = ["event_tee", "finisher_tee", "medal", "size_chart", "route_map"];
+  return (ev.entitlements ?? [])
+    .filter((e) => e.image_url)
+    .sort((a, b) => (order.indexOf(a.kind) + 1 || 99) - (order.indexOf(b.kind) + 1 || 99))
+    .slice(0, n);
+};
+
 function toast(msg) {
   const el = $("#toast");
   el.textContent = msg;
@@ -610,10 +655,29 @@ function render() {
     const countdown =
       d === null ? "" : d === 0 ? '<span class="countdown soon">Race day</span>' : d > 0 ? `<span class="countdown${d <= 14 ? " soon" : ""}">${d}d to go</span>` : `<span class="countdown">${Math.abs(d)}d ago</span>`;
 
+    // Distance chips carry the price, so the card answers "what will this cost me?".
+    const priced = priceByDistance(ev);
+    const chips = priced.length
+      ? priced
+          .slice(0, 5)
+          .map(([km, p]) => `<span class="dist">${km}K${p != null ? ` <b>${money(p)}</b>` : ""}</span>`)
+          .join("")
+      : dists.map((x) => `<span class="dist">${x}km</span>`).join("");
+
+    const eb = earlyBird(ev);
+    const ebBadge = eb ? `<span class="tag eb">Early bird ${eb.days === 0 ? "ends today" : `ends in ${eb.days}d`}</span>` : "";
+
+    const thumbs = kitThumbs(ev);
+    const thumbsHtml = thumbs.length
+      ? `<div class="kit">${thumbs
+          .map((t) => `<img src="${esc(t.image_url)}" alt="${esc(t.title ?? t.kind)}" loading="lazy" title="${esc(t.title ?? t.kind)}" />`)
+          .join("")}</div>`
+      : "";
+
     card.innerHTML = `
       <div class="thumb" ${ev.banner_url ? `style="background-image:url('${encodeURI(ev.banner_url)}')"` : ""}>
         ${ev.banner_url ? "" : '<span class="ph">🏁</span>'}
-        <div class="tags">${tags.join("")}</div>
+        <div class="tags">${ebBadge}${tags.join("")}</div>
       </div>
       <div class="body">
         <h4>${esc(ev.title)}</h4>
@@ -622,7 +686,10 @@ function render() {
           ${ev.state ? `<span>· ${esc(ev.state)}</span>` : ""}
           ${countdown}
         </div>
-        ${dists.length ? `<div class="distances">${dists.map((x) => `<span class="dist">${x}km</span>`).join("")}</div>` : ""}
+        <div class="cardrow">
+          ${chips ? `<div class="distances">${chips}</div>` : ""}
+          ${thumbsHtml}
+        </div>
         ${price ? `<div class="price">${price}</div>` : ""}
       </div>
       <div class="foot">

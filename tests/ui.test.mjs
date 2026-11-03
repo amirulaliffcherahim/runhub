@@ -218,3 +218,46 @@ test("empty DB shows the empty state, not a crash (AC-10 boundary)", { skip }, a
   emptyServer.close();
   await empty.cleanup();
 });
+
+test("cards answer price and kit questions without opening the drawer (Z5)", { skip }, async () => {
+  const page = await browser.newPage();
+  await page.goto(base, { waitUntil: "networkidle" });
+  await page.waitForSelector(".card");
+
+  // Distance chip carries the cheapest normal price for that distance.
+  const klscm = page.locator('.card[data-id="klscm-2026"]');
+  const chips = await klscm.locator(".dist").allTextContents();
+  assert.ok(chips.some((c) => /21K/.test(c) && /RM120/.test(c)), `21K chip shows its price: ${chips.join(" | ")}`);
+  assert.ok(chips.some((c) => /42K/.test(c) && /RM160/.test(c)), `42K chip shows its price: ${chips.join(" | ")}`);
+
+  // Kit thumbnails render on the card (tee + medal seeded for this event).
+  assert.equal(await klscm.locator(".kit img").count(), 2);
+
+  await page.close();
+});
+
+test("early-bird badge appears only while the cut-off is in the future (Z5)", { skip }, async () => {
+  // Seed one event with a future early-bird date and one in the past.
+  const { saveEvent } = await import("../db.mjs");
+  await saveEvent(ctx.db, {
+    id: "eb-future", title: "Future Early Bird Run 2099", start_date: "2099-06-01", state: "Selangor", status: "open",
+    categories: [{ distance_km: 10, label: "10km", price_early: 50, price_normal: 70, early_bird_ends: "2099-03-01" }],
+    entitlements: [], sources: [{ portal: "howei", source_url: "https://howei.com/event_details/ebf" }],
+  });
+  await saveEvent(ctx.db, {
+    id: "eb-past", title: "Past Early Bird Run 2099", start_date: "2099-08-01", state: "Selangor", status: "open",
+    categories: [{ distance_km: 10, label: "10km", price_early: 50, price_normal: 70, early_bird_ends: "2020-01-01" }],
+    entitlements: [], sources: [{ portal: "howei", source_url: "https://howei.com/event_details/ebp" }],
+  });
+
+  const page = await browser.newPage();
+  await page.goto(base, { waitUntil: "networkidle" });
+  await page.waitForSelector('.card[data-id="eb-future"]');
+
+  const future = await page.locator('.card[data-id="eb-future"] .tag.eb').allTextContents();
+  assert.equal(future.length, 1, "future cut-off shows a badge");
+  assert.match(future[0], /Early bird ends in \d+d/);
+  assert.equal(await page.locator('.card[data-id="eb-past"] .tag.eb').count(), 0, "expired cut-off shows nothing");
+
+  await page.close();
+});
