@@ -90,3 +90,14 @@ Decision: do not add `/api/image-proxy` - it would only add SSRF surface. If a h
 starts blocking, the design is: allowlist of image hosts, no redirects off-allowlist,
 http(s) only, reject private/loopback IPs, image/* content-type required, 5 MB cap,
 cached with ETag.
+
+## Zero-click-out follow-ups (after Z1-Z9)
+- **Cut-off times are the big hole (1%).** Only BiiB publishes them. Options: open the
+  RaceXasia/JomRun detail images with an OCR pass, or let the AI crawler read the
+  "flag-off & cut-off" image blocks (it is already wired, just needs a vision step).
+- **min age / early-bird (1%)**: RaceXasia KeyDate tables only. Ask the AI crawler to read
+  the category image for age bands.
+- **finisher tee (10%)**: JomRun states it per distance; Howei/RaceXasia only show an image.
+  A size-chart/kit image caption is the only other signal.
+- BiiB detail pages: only 2 of 33 have a Participation block, so most BiiB events stay
+  price-less and time-less. Nothing to parse, not a parser bug.
