@@ -631,3 +631,39 @@ The UI pill reads the same endpoint: it shows "Synced 3m ago" / "Synced (warning
     run 5  status ok  portals ["heyjom"]  portal_runs ["heyjom:ok(49)"]
     sync: 800 scraped -> 466 unique, 555 categories, 1266 entitlements,
           151 archived (date), 0 errors, 641 requests across 9 hosts in 1065s
+
+## 17. Atomic publish - the UI is never affected by a sync (2026-11-03)
+
+The requirement: fetching must only update the database, never disturb what the UI shows.
+
+### How it works
+
+`runSync` is now two clearly separated phases:
+
+| Phase | Duration | Writes to event data |
+|---|---|---|
+| **Crawl** - every portal is fetched into memory | ~18 min | **none** |
+| **Publish** - `withTransaction`: save all events, archive expired/delisted | ~50 ms | all of it, atomically |
+
+- During the crawl only *status* rows change (`sync_runs`, `sync_portal_runs`), so progress
+  is visible without touching the catalogue.
+- The publish runs inside a single Postgres transaction. Readers keep seeing the previous
+  committed snapshot until `COMMIT` and are never blocked (MVCC), so the UI flips from
+  "old complete dataset" to "new complete dataset" with no in-between state.
+- If the publish fails (constraint, crash, killed process) the transaction rolls back
+  completely: the old data stays exactly as it was, and the run is closed as `failed`
+  with the error recorded.
+- `saveEvent` is transaction-aware: called bare it opens its own transaction (used by tests
+  and one-off scripts), called with a `tx` handle it joins the caller's transaction.
+
+### Verified (itsmini)
+
+```
+heyjom: 49 events (365ms)
+published 48 events in 46ms (single transaction)
+run 6 status ok | API polls during sync: 200, 200 | active events: 312 (unchanged)
+```
+
+Tests: `tests/sync.test.mjs` covers all three guarantees -
+a mid-publish failure leaves the previous data untouched, a crashed run is still closed,
+and a scraper inspecting the DB mid-crawl still sees only the previous dataset.
