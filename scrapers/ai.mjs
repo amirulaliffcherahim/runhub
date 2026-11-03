@@ -17,6 +17,7 @@ import { stripHtml, decodeEntities } from "./html.mjs";
 import { urlFor } from "./config.mjs";
 import { statusFromText } from "./status.mjs";
 import { canonicalState } from "./states.mjs";
+import { policyFor, aiUseAllowed } from "./robots.mjs";
 
 const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
 const pad = (n) => String(n).padStart(2, "0");
@@ -204,6 +205,20 @@ export async function scrapeAi(cfg, { ask = askModel, fetchImpl = fetchWithRetry
   if (!targets.length) throw new Error("ai: no event links found");
 
   // 2) read each page, ask the model, validate
+  // A site can refuse model use via robots.txt content signals; check once per host.
+  const aiPolicy = await policyFor(
+    cfg.baseUrl,
+    async (u, { timeoutMs }) => {
+      const r = await fetchImpl(u, 1, { timeoutMs, respectRobots: false });
+      return { status: r.status, text: r.text };
+    },
+    { timeoutMs: cfg.timeoutMs ?? 15000 }
+  );
+  const aiUse = aiUseAllowed(aiPolicy);
+  if (!aiUse.allowed) {
+    return { portal: "ai", events: [], errors: [`ai: ${cfg.name} refused model use (${aiUse.reason})`], rejected: [] };
+  }
+
   for (const url of targets) {
     const page = await fetchImpl(url, cfg.retries ?? 1, opts);
     if (page.status !== 200) {

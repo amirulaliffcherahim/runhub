@@ -251,8 +251,15 @@ import { createServer } from "node:http";
 import { fetchWithRetry } from "../scrapers/fetch.mjs";
 
 test("fetchWithRetry retries 5xx/429 with backoff but returns 404 immediately", async () => {
-  const hits = { flaky: 0, gone: 0, dead: 0 };
+  const hits = { flaky: 0, gone: 0, dead: 0, robots: 0 };
   const srv = createServer((req, res) => {
+    // Every request now checks robots.txt first; answer it explicitly so it does not
+    // land in the catch-all branch and inflate the counters.
+    if (req.url === "/robots.txt") {
+      hits.robots++;
+      res.writeHead(404).end("");
+      return;
+    }
     if (req.url === "/flaky") {
       hits.flaky++;
       res.writeHead(hits.flaky < 3 ? 500 : 200).end(hits.flaky < 3 ? "no" : "yes");
@@ -441,4 +448,68 @@ test("ai: a model that returns junk yields a rejection, not an event", async () 
   );
   assert.equal(res.events.length, 0);
   assert.equal(res.rejected.length, 1);
+});
+
+// ---------- robots.txt + politeness ----------
+import { parseRobots, isAllowed, aiUseAllowed } from "../scrapers/robots.mjs";
+import { schedule, configureThrottle, throttleReport, resetThrottle } from "../scrapers/throttle.mjs";
+
+test("robots: longest match wins, ties go to Allow", () => {
+  const { rules } = parseRobots("User-agent: *\nDisallow: /admin\nAllow: /admin/public\nDisallow: /private\n");
+  assert.equal(isAllowed(rules, "/"), true);
+  assert.equal(isAllowed(rules, "/events"), true);
+  assert.equal(isAllowed(rules, "/admin"), false);
+  assert.equal(isAllowed(rules, "/admin/public/x"), true, "more specific Allow wins");
+  assert.equal(isAllowed(rules, "/private/page"), false);
+});
+
+test("robots: only the * group counts, and a bare Disallow means allow-all", () => {
+  const p = parseRobots("User-agent: GPTBot\nDisallow: /\n\nUser-agent: *\nDisallow:\n");
+  assert.deepEqual(p.rules, []);
+  assert.equal(isAllowed(p.rules, "/anything"), true);
+});
+
+test("robots: crawl-delay takes the strictest declared value", () => {
+  // Howei really does this: bingbot 10s, * 5s.
+  const p = parseRobots("User-agent: bingbot\nCrawl-delay: 10\n\nUser-agent: *\nCrawl-delay: 5\n");
+  assert.equal(p.crawlDelayMs, 5000, "the * group is what applies to us");
+  const multi = parseRobots("User-agent: *\nCrawl-delay: 2\nCrawl-delay: 7\n");
+  assert.equal(multi.crawlDelayMs, 7000, "strictest wins");
+});
+
+test("robots: content signals gate model use", () => {
+  const p = parseRobots("User-agent: *\nContent-Signal: search=yes,ai-train=no,use=reference\nAllow: /\n");
+  assert.equal(p.contentSignals["ai-train"], "no");
+  assert.equal(aiUseAllowed(p).allowed, false);
+  assert.match(aiUseAllowed(p).reason, /ai-train=no/);
+
+  const ok = parseRobots("User-agent: *\nContent-Signal: search=yes,ai-input=yes\nAllow: /\n");
+  assert.equal(aiUseAllowed(ok).allowed, true);
+  assert.equal(aiUseAllowed({}).allowed, true, "no signals means no restriction");
+});
+
+test("throttle: serialises per host and enforces the gap", async () => {
+  resetThrottle();
+  configureThrottle({ maxRequests: 100 });
+  const t0 = Date.now();
+  const order = [];
+  await Promise.all([
+    schedule("https://a.example/1", 120, async () => { order.push(1); }),
+    schedule("https://a.example/2", 120, async () => { order.push(2); }),
+    schedule("https://b.example/1", 120, async () => { order.push(3); }),
+  ]);
+  const elapsed = Date.now() - t0;
+  // b.example is a different host, so it may run immediately; only same-host order is fixed.
+  assert.ok(order.indexOf(1) < order.indexOf(2), "same-host requests keep their order");
+  assert.ok(elapsed >= 110, `second same-host request waited (${elapsed}ms)`);
+  assert.equal(throttleReport().requests, 3);
+});
+
+test("throttle: refuses once the request budget is spent", async () => {
+  resetThrottle();
+  configureThrottle({ maxRequests: 2 });
+  await schedule("https://a.example/1", 0, async () => {});
+  await schedule("https://a.example/2", 0, async () => {});
+  await assert.rejects(schedule("https://a.example/3", 0, async () => {}), /budget exhausted/);
+  resetThrottle();
 });

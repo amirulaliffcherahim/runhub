@@ -110,7 +110,7 @@
       "listUrls": ["/emas/portal"],
       "linkPattern": "href=\"([^\"]*/emas/portal/event/[^\"]+)\"",
       "maxEvents": 12,
-      "note": "DO NOT ENABLE: robots.txt is 'Disallow: /' - we are not welcome there. Kept as a template."
+      "note": "Kept as a template only. robots.txt allows crawling but declares Content-Signal ai-train=no and blocks AI-training bots, so the AI crawler refuses it (see scrapers/robots.mjs aiUseAllowed)."
     }
   }
 }

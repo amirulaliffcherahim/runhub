@@ -14,9 +14,13 @@ const TTL_MS = 6 * 60 * 60 * 1000;
 
 const normalise = (p) => p.replace(/\*+$/, "").replace(/\/+$/, "") || "/";
 
-/** Parse robots.txt into `{ rules: [{ allow, path }], crawlDelayMs }` for `*`. */
+/**
+ * Parse robots.txt into `{ rules, crawlDelayMs, contentSignals }` for `*`.
+ * `contentSignals` comes from Cloudflare-style `Content-Signal: search=yes,ai-train=no`.
+ */
 export function parseRobots(text) {
   const rules = [];
+  const contentSignals = {};
   let crawlDelayMs = null;
   let inStar = false;
   let sawAgent = false;
@@ -43,11 +47,17 @@ export function parseRobots(text) {
       rules.push({ allow: field === "allow", path: normalise(value) });
     } else if (field === "crawl-delay") {
       const n = Number.parseFloat(value);
-      if (Number.isFinite(n) && n >= 0) crawlDelayMs = Math.min(n * 1000, 60_000);
+      // Several Crawl-delay lines can appear (one per group); keep the strictest.
+      if (Number.isFinite(n) && n >= 0) crawlDelayMs = Math.max(crawlDelayMs ?? 0, Math.min(n * 1000, 60_000));
+    } else if (field === "content-signal") {
+      for (const part of value.split(",")) {
+        const [k, v] = part.split("=").map((x) => x.trim().toLowerCase());
+        if (k && v) contentSignals[k] = v;
+      }
     }
   }
   // Drop group separators.
-  return { rules: rules.filter((r) => r.path !== "\u0000group"), crawlDelayMs };
+  return { rules: rules.filter((r) => r.path !== "\u0000group"), crawlDelayMs, contentSignals };
 }
 
 /** Longest matching rule wins; ties go to Allow. No match = allowed. */
@@ -74,22 +84,36 @@ export async function policyFor(url, fetchText, { timeoutMs = 10000 } = {}) {
 
   let rules = [];
   let crawlDelayMs = null;
+  let contentSignals = {};
   try {
     const res = await fetchText(`${host}/robots.txt`, { timeoutMs });
     if (res.status === 200) {
       const parsed = parseRobots(res.text);
       rules = parsed.rules;
       crawlDelayMs = parsed.crawlDelayMs;
+      contentSignals = parsed.contentSignals;
     }
   } catch {
     // No robots.txt (or unreachable) means no declared restrictions.
   }
 
-  const entry = { rules, crawlDelayMs, fetchedAt: Date.now() };
+  const entry = { rules, crawlDelayMs, contentSignals, fetchedAt: Date.now() };
   cache.set(host, entry);
   return entry;
 }
 
 export function clearRobotsCache() {
   cache.clear();
+}
+
+/**
+ * May we feed this host's pages to a model?
+ * Honours `Content-Signal: ai-input=no` / `ai-train=no` (Cloudflare content signals).
+ * Returns `{ allowed, reason }`.
+ */
+export function aiUseAllowed(policy) {
+  const s = policy?.contentSignals ?? {};
+  if (s["ai-input"] === "no") return { allowed: false, reason: "robots Content-Signal ai-input=no" };
+  if (s["ai-train"] === "no") return { allowed: false, reason: "robots Content-Signal ai-train=no" };
+  return { allowed: true, reason: null };
 }
