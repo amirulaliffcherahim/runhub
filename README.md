@@ -93,5 +93,7 @@ Tune it in the `politeness` block of `sources.json`.
 - Postgres: role+db `runhub` on the local server (port 5433); `DATABASE_URL` only in `.env` (0600).
 - Daily sync: cron `0 7 * * *` (host is Asia/Kuala_Lumpur) -> `logs/sync.log`.
 - ufw: `allow in on tailscale0 to any port 3300`.
-- Update: `git archive HEAD | ssh itsmini 'tar -xf - -C ~/code/runhub' && ssh itsmini 'pm2 restart runhub'`.
-  Data lives in Postgres, so the archive never touches it. `.env` is not in git either.
+- Source of truth: <https://github.com/amirulaliffcherahim/runhub> (branch `main`).
+- `~/code/runhub` on itsmini is a real clone. Update: push, then
+  `ssh itsmini 'cd ~/code/runhub && git pull --ff-only && pm2 restart runhub'`.
+  Data lives in Postgres and `.env` is untracked, so a pull never touches either.
