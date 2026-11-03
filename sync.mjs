@@ -12,7 +12,10 @@
  *    left alone). `events.origin` records who found an event first and is informational.
  */
 import { pathToFileURL } from "node:url";
-import { openDb, saveEvent, recordSyncRun, archiveExpired, archiveStale } from "./db.mjs";
+import {
+  openDb, saveEvent, archiveExpired, archiveStale,
+  startSyncRun, recordPortalRun, finishSyncRun,
+} from "./db.mjs";
 import { dedupe } from "./scrapers/normalizer.mjs";
 import { resolveState, isRunning } from "./scrapers/states.mjs";
 import { scrapeRaceXasia } from "./scrapers/racexasia.mjs";
@@ -50,10 +53,13 @@ export function buildScrapers(sources = loadSources()) {
   });
 }
 
-export async function runSync({ db, dbPath, log = console.log, scrapers = buildScrapers(), skipArchive = false } = {}) {
+export async function runSync({ db, dbPath, log = console.log, quiet = false, scrapers = buildScrapers(), skipArchive = false } = {}) {
   const ownDb = !db;
   const conn = db ?? (await openDb({ connectionString: dbPath }));
   const startedAt = new Date().toISOString();
+  const say = quiet ? () => {} : log;
+  // A run row is opened immediately, so a silent run is inspectable while it happens.
+  const runId = await startSyncRun(conn, { startedAt, portals: scrapers.map(([n]) => n) });
 
   // Be a good citizen: robots.txt + per-host rate limits, configured in sources.json.
   const politeness = loadPoliteness();
@@ -67,15 +73,30 @@ export async function runSync({ db, dbPath, log = console.log, scrapers = buildS
   try {
     for (const [name, fn] of scrapers) {
       const t0 = Date.now();
+      const portalStarted = new Date().toISOString();
       try {
         const res = await fn();
         collected.push(...res.events);
         errors.push(...(res.errors ?? []));
         portalsRun.push(name);
-        log(`  ${name}: ${res.events.length} events (${Date.now() - t0}ms)`);
+        say(`  ${name}: ${res.events.length} events (${Date.now() - t0}ms)`);
+        await recordPortalRun(conn, runId, name, {
+          startedAt: portalStarted,
+          finishedAt: new Date().toISOString(),
+          events: res.events.length,
+          errors: res.errors ?? [],
+          status: (res.errors ?? []).length ? "partial" : "ok",
+        });
       } catch (e) {
         errors.push(`${name}: ${e.message}`);
-        log(`  ${name}: FAILED - ${e.message}`);
+        say(`  ${name}: FAILED - ${e.message}`);
+        await recordPortalRun(conn, runId, name, {
+          startedAt: portalStarted,
+          finishedAt: new Date().toISOString(),
+          events: 0,
+          errors: [e.message],
+          status: "failed",
+        });
       }
     }
 
@@ -124,7 +145,7 @@ export async function runSync({ db, dbPath, log = console.log, scrapers = buildS
     }
 
     const http = throttleReport();
-    log(`  http: ${http.requests} requests across ${http.hosts} hosts in ${http.seconds}s`);
+    say(`  http: ${http.requests} requests across ${http.hosts} hosts in ${http.seconds}s`);
 
     const counts = {
       http_requests: http.requests,
@@ -140,15 +161,25 @@ export async function runSync({ db, dbPath, log = console.log, scrapers = buildS
     };
 
     const finishedAt = new Date().toISOString();
-    await recordSyncRun(conn, { startedAt, finishedAt, portals: portalsRun, counts, errors });
+    const status = portalsRun.length === 0 ? "failed" : errors.length ? "partial" : "ok";
+    await finishSyncRun(conn, runId, { finishedAt, portals: portalsRun, counts, errors, status });
 
-    log(
+    say(
       `sync done: ${counts.scraped} scraped -> ${counts.unique} unique, ` +
         `${counts.categories} categories, ${counts.entitlements} entitlements, ` +
         `${archivedDate} archived (date), ${archivedStale} archived (delisted), ${errors.length} errors`
     );
 
-    return { counts, errors, portals: portalsRun, startedAt, finishedAt };
+    return { runId, status, counts, errors, portals: portalsRun, startedAt, finishedAt };
+  } catch (e) {
+    // Never leave a run stuck on "running": record the crash, then rethrow.
+    await finishSyncRun(conn, runId, {
+      portals: portalsRun,
+      counts: {},
+      errors: [...errors, e.message],
+      status: "failed",
+    }).catch(() => {});
+    throw e;
   } finally {
     if (ownDb) await conn.close();
   }
@@ -157,8 +188,10 @@ export async function runSync({ db, dbPath, log = console.log, scrapers = buildS
 const isMain = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
 
 if (isMain) {
-  console.log(`[${new Date().toISOString()}] RunHub sync starting`);
-  runSync()
+  // --quiet: no console output; the run is recorded in Postgres (sync_runs + sync_portal_runs).
+  const quiet = process.argv.includes("--quiet");
+  if (!quiet) console.log(`[${new Date().toISOString()}] RunHub sync starting`);
+  runSync({ quiet })
     .then(({ portals }) => {
       // Partial success is normal (per-detail 404s land in sync_runs.errors).
       // Exit non-zero only if no portal succeeded at all.

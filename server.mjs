@@ -10,6 +10,7 @@ import {
   saveMyRace,
   deleteMyRace,
   lastSyncRun,
+  recentSyncRuns,
   dbStats,
 } from "./db.mjs";
 import { runSync } from "./sync.mjs";
@@ -107,6 +108,12 @@ export async function createApp({ dbPath, db: existing } = {}) {
       if (path === "/api/sync/status" && req.method === "GET") {
         const [run, stats] = await Promise.all([lastSyncRun(db), dbStats(db)]);
         return json(res, 200, { ...(run ?? {}), running: Boolean(syncing), stats });
+      }
+
+      // Recent runs with per-portal results: the "check on the backend" endpoint.
+      if (path === "/api/sync/runs" && req.method === "GET") {
+        const limit = Math.min(Number(url.searchParams.get("limit")) || 10, 50);
+        return json(res, 200, await recentSyncRuns(db, limit));
       }
 
       if (path === "/api/sync/run" && req.method === "POST") {

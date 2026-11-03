@@ -45,6 +45,40 @@ const withDb = async (fn) => {
 
 const count = async (db, sql) => (await db.query(sql)).rows[0].c;
 
+test("a run is recorded in Postgres with per-portal rows (silent-run support)", { skip }, () =>
+  withDb(async (db) => {
+    const res = await runSync({
+      db,
+      quiet: true,
+      scrapers: [
+        ["howei", stub([ev({ title: "Alpha Quiet Run 2099" })])],
+        ["broken", boom],
+      ],
+    });
+    assert.ok(res.runId, "run id returned");
+
+    const run = (await db.query("SELECT * FROM sync_runs WHERE id=$1", [res.runId])).rows[0];
+    assert.equal(run.status, "partial", "one portal failed, one succeeded");
+    assert.ok(run.finished_at);
+
+    const portals = (await db.query("SELECT portal, status, events, errors FROM sync_portal_runs WHERE run_id=$1 ORDER BY portal", [res.runId])).rows;
+    assert.deepEqual(portals.map((p) => `${p.portal}:${p.status}`), ["broken:failed", "howei:ok"]);
+    assert.equal(portals[0].events, 0);
+    assert.match(JSON.parse(portals[0].errors)[0], /timeout/);
+    assert.equal(portals[1].events, 1);
+  }));
+
+test("a run where every portal fails is closed as failed, not left running", { skip }, () =>
+  withDb(async (db) => {
+    const res = await runSync({ db, quiet: true, scrapers: [["howei", boom], ["jomrun", boom]] });
+    const run = (await db.query("SELECT status, finished_at FROM sync_runs WHERE id=$1", [res.runId])).rows[0];
+    assert.equal(run.status, "failed");
+    assert.ok(run.finished_at, "the run is closed");
+    assert.equal(res.portals.length, 0);
+    const portals = (await db.query("SELECT status FROM sync_portal_runs WHERE run_id=$1", [res.runId])).rows;
+    assert.deepEqual(portals.map((p) => p.status), ["failed", "failed"]);
+  }));
+
 test("TC-DB-01: sync is idempotent and records a run (AC-01, AC-02)", { skip }, () =>
   withDb(async (db) => {
     const scrapers = [["howei", stub([

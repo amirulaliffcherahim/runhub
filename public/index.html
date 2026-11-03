@@ -506,20 +506,43 @@ function renderSync(status) {
   state.syncing = Boolean(status.running);
   dot.classList.toggle("busy", state.syncing);
 
-  if (state.syncing) {
+  const parse = (v) => {
+    try {
+      return v ? JSON.parse(v) : [];
+    } catch {
+      return [];
+    }
+  };
+  const errors = parse(status.errors);
+  const failed = (status.portal_runs ?? []).filter((p) => p.status === "failed");
+  const pill = $("#syncPill");
+
+  if (state.syncing || status.status === "running") {
     text.textContent = "Syncing…";
   } else if (!status.finished_at) {
-    text.textContent = "Never synced";
+    text.textContent = status.status === "interrupted" ? "Last run interrupted" : "Never synced";
   } else {
     const secs = Math.max(0, Math.round((Date.now() - Date.parse(status.finished_at)) / 1000));
-    text.textContent = secs < 90 ? `Synced ${secs}s ago` : `Synced ${Math.round(secs / 60)}m ago`;
-    const counts = status.counts ? JSON.parse(status.counts) : null;
-    const errors = status.errors ? JSON.parse(status.errors) : [];
-    $("#footerSync").textContent = status.stats ? `${status.stats.active} active · ${status.stats.archived} archived` : counts
-      ? `${counts.unique ?? 0} events · ${counts.categories ?? 0} categories · ${errors.length} portal warnings`
-      : "—";
+    const when = secs < 90 ? `${secs}s ago` : `${Math.round(secs / 60)}m ago`;
+    const label = { ok: "Synced", partial: "Synced (warnings)", failed: "Sync failed", interrupted: "Sync interrupted" }[status.status] ?? "Synced";
+    text.textContent = `${label} ${when}`;
   }
-  $("#syncBtn").disabled = state.syncing;
+
+  // A failing portal is visible without opening anything.
+  pill.title = failed.length
+    ? `Failed portals: ${failed.map((p) => p.portal).join(", ")}`
+    : errors.length
+      ? `${errors.length} warning(s) in the last run`
+      : "No errors in the last run";
+  pill.style.borderColor = failed.length || status.status === "failed" ? "#b91c1c" : "";
+
+  const bits = [];
+  if (status.stats) bits.push(`${status.stats.active} active · ${status.stats.archived} archived`);
+  if (errors.length) bits.push(`${errors.length} warning${errors.length === 1 ? "" : "s"}`);
+  if (failed.length) bits.push(`failed: ${failed.map((p) => p.portal).join(", ")}`);
+  $("#footerSync").textContent = bits.join(" · ") || "—";
+
+  $("#syncBtn").disabled = state.syncing || status.status === "running";
 }
 
 /* ---------- filtering ---------- */

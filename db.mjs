@@ -105,7 +105,20 @@ CREATE TABLE IF NOT EXISTS sync_runs (
   finished_at TEXT,
   portals     TEXT,
   counts      TEXT,
-  errors      TEXT
+  errors      TEXT,
+  status      TEXT              -- running | ok | failed | interrupted
+);
+
+-- One row per portal per run, so a silent run can still be inspected afterwards.
+CREATE TABLE IF NOT EXISTS sync_portal_runs (
+  run_id      INTEGER NOT NULL REFERENCES sync_runs(id) ON DELETE CASCADE,
+  portal      TEXT NOT NULL,
+  started_at  TEXT,
+  finished_at TEXT,
+  events      INTEGER,
+  errors      TEXT,
+  status      TEXT,
+  PRIMARY KEY (run_id, portal)
 );
 
 CREATE INDEX IF NOT EXISTS idx_categories_event ON categories(event_id);
@@ -113,6 +126,7 @@ CREATE INDEX IF NOT EXISTS idx_entitlements_event ON entitlements(event_id);
 CREATE INDEX IF NOT EXISTS idx_events_start ON events(start_date);
 CREATE INDEX IF NOT EXISTS idx_events_archived ON events(archived_at);
 CREATE INDEX IF NOT EXISTS idx_sources_url ON event_sources(source_url);
+CREATE INDEX IF NOT EXISTS idx_portal_runs_run ON sync_portal_runs(run_id);
 `;
 
 /** Columns added after the first release; applied idempotently to existing DBs. */
@@ -158,6 +172,8 @@ export async function openDb({ connectionString = process.env.DATABASE_URL, sche
   for (const [col, type] of MIGRATIONS) {
     await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS ${col} ${type}`);
   }
+  // Columns added to other tables after their first release.
+  await pool.query("ALTER TABLE sync_runs ADD COLUMN IF NOT EXISTS status TEXT");
   return db;
 }
 
@@ -405,15 +421,87 @@ export const deleteMyRace = async (db, eventId) => {
   await db.query("DELETE FROM my_races WHERE event_id = $1", [eventId]);
 };
 
-export const lastSyncRun = async (db) =>
-  (await db.query("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1")).rows[0] ?? null;
+/**
+ * Sync runs are recorded in Postgres so a silent/cron run can be inspected later:
+ * one `sync_runs` row per run (status running -> ok|failed) plus one
+ * `sync_portal_runs` row per portal (events, errors, duration).
+ * A run still marked "running" after `STALE_MINUTES` is reported as interrupted,
+ * which is how a crashed or killed process shows up.
+ */
+export const STALE_MINUTES = 90;
 
-export async function recordSyncRun(db, { startedAt, finishedAt, portals, counts, errors }) {
-  await db.query(
-    `INSERT INTO sync_runs (started_at, finished_at, portals, counts, errors)
-     VALUES ($1,$2,$3,$4,$5)`,
-    [startedAt, finishedAt, JSON.stringify(portals), JSON.stringify(counts), JSON.stringify(errors)]
+/** Open a run row. Returns its id. */
+export async function startSyncRun(db, { startedAt = now(), portals = [] } = {}) {
+  const { rows } = await db.query(
+    `INSERT INTO sync_runs (started_at, portals, status, counts, errors)
+     VALUES ($1,$2,'running','{}','[]') RETURNING id`,
+    [startedAt, JSON.stringify(portals)]
   );
+  return rows[0].id;
+}
+
+/** Record (or update) one portal's result inside a run. */
+export async function recordPortalRun(db, runId, portal, { startedAt, finishedAt, events = 0, errors = [], status = "ok" }) {
+  await db.query(
+    `INSERT INTO sync_portal_runs (run_id, portal, started_at, finished_at, events, errors, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     ON CONFLICT (run_id, portal) DO UPDATE SET
+       finished_at=EXCLUDED.finished_at, events=EXCLUDED.events,
+       errors=EXCLUDED.errors, status=EXCLUDED.status`,
+    [runId, portal, startedAt, finishedAt, events, JSON.stringify(errors), status]
+  );
+}
+
+/** Close a run row. */
+export async function finishSyncRun(db, runId, { finishedAt = now(), portals, counts, errors, status = "ok" }) {
+  await db.query(
+    `UPDATE sync_runs SET finished_at=$1, portals=$2, counts=$3, errors=$4, status=$5 WHERE id=$6`,
+    [finishedAt, JSON.stringify(portals), JSON.stringify(counts), JSON.stringify(errors), status, runId]
+  );
+}
+
+/** Back-compat single-shot insert (used by older tests). */
+export async function recordSyncRun(db, { startedAt, finishedAt, portals, counts, errors, status = "ok" }) {
+  await db.query(
+    `INSERT INTO sync_runs (started_at, finished_at, portals, counts, errors, status)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [startedAt, finishedAt, JSON.stringify(portals), JSON.stringify(counts), JSON.stringify(errors), status]
+  );
+}
+
+const markStale = async (db) => {
+  await db.query(
+    `UPDATE sync_runs SET status='interrupted'
+      WHERE status='running' AND started_at < $1`,
+    [new Date(Date.now() - STALE_MINUTES * 60_000).toISOString()]
+  );
+};
+
+/** Latest run plus its per-portal rows. Used by /api/sync/status. */
+export async function lastSyncRun(db) {
+  await markStale(db);
+  const run = (await db.query("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1")).rows[0] ?? null;
+  if (!run) return null;
+  const portals = (
+    await db.query("SELECT portal, started_at, finished_at, events, errors, status FROM sync_portal_runs WHERE run_id=$1 ORDER BY portal", [run.id])
+  ).rows.map((p) => ({ ...p, errors: parseJson(p.errors) }));
+  return { ...run, portal_runs: portals };
+}
+
+/** Recent runs (newest first) for a status page or curl. */
+export async function recentSyncRuns(db, limit = 10) {
+  await markStale(db);
+  const { rows } = await db.query(
+    `SELECT id, started_at, finished_at, status, portals, counts, errors
+       FROM sync_runs ORDER BY id DESC LIMIT $1`,
+    [limit]
+  );
+  return rows.map((r) => ({
+    ...r,
+    counts: parseJson(r.counts),
+    errors: parseJson(r.errors),
+    portals: parseJson(r.portals),
+  }));
 }
 
 /** Counts used by /api/sync/status and the footer. */

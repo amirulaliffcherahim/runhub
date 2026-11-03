@@ -193,3 +193,17 @@ test("static path traversal is refused", { skip }, async () => {
 test("unknown api route returns 404", { skip }, async () => {
   assert.equal((await get("/api/nope")).status, 404);
 });
+
+test("GET /api/sync/runs lists recent runs with per-portal detail", { skip }, async () => {
+  const runs = await (await get("/api/sync/runs?limit=5")).json();
+  assert.ok(Array.isArray(runs) && runs.length >= 1);
+  const latest = runs[0];
+  assert.ok("status" in latest);
+  assert.ok(Array.isArray(latest.errors), "errors are parsed, not a JSON string");
+  assert.equal(typeof latest.counts, "object", "counts is parsed into an object");
+});
+
+test("GET /api/sync/status exposes portal_runs for the latest run", { skip }, async () => {
+  const s = await (await get("/api/sync/status")).json();
+  assert.ok(Array.isArray(s.portal_runs));
+});
