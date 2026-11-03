@@ -83,16 +83,26 @@
       "note": "Detail pages return HTTP 500 (event.categories.map). Re-enable when fixed."
     },
 
-    "emas": {
+    "racingschedule": {
       "enabled": true,
+      "type": "ai",
+      "baseUrl": "https://racingschedule.com",
+      "listUrls": ["/races/my"],
+      "linkPattern": "href=\"(/race/[^\"]+)\"",
+      "maxEvents": 12,
+      "maxChars": 2500,
+      "llmTimeoutMs": 120000,
+      "note": "AI crawler (BitNet on this host). Prose pages with no structured data. ~6s/page."
+    },
+
+    "emas": {
+      "enabled": false,
       "type": "ai",
       "baseUrl": "https://emas.etranspay.com",
       "listUrls": ["/emas/portal"],
       "linkPattern": "href=\"([^\"]*/emas/portal/event/[^\"]+)\"",
       "maxEvents": 12,
-      "maxChars": 2500,
-      "llmTimeoutMs": 120000,
-      "note": "AI crawler. Prose-only pages, no JSON-LD. Needs the BitNet server on this host (LLM_URL)."
+      "note": "AI crawler. Works, but this portal currently lists mostly finished races (0 upcoming)."
     }
   }
 }
