@@ -11,3 +11,6 @@ data/
 .DS_Store
 Thumbs.db
 logs/
+
+# pi session exports accidentally dropped in the repo
+pi-session-*.html
