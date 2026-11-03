@@ -207,3 +207,15 @@ test("GET /api/sync/status exposes portal_runs for the latest run", { skip }, as
   const s = await (await get("/api/sync/status")).json();
   assert.ok(Array.isArray(s.portal_runs));
 });
+
+test("GET /api/events attaches clash warnings for unsaved events (Z8)", { skip }, async () => {
+  // api-race-2026 is already in My Season from an earlier test; api-penang-2026 is not.
+  const events = await (await get("/api/events")).json();
+  const saved = events.find((e) => e.id === "api-race-2026");
+  assert.equal(saved.clashes, undefined, "a race in My Season carries no badge");
+
+  const other = events.find((e) => e.id === "api-penang-2026");
+  assert.ok(Array.isArray(other.clashes), "unsaved events always carry an array");
+  // api-race-2026 is 2099-08-01, api-penang-2026 is 2099-09-01 -> far apart, no clash.
+  assert.deepEqual(other.clashes, []);
+});

@@ -158,6 +158,7 @@
   .tag.closed { background: #334155; color: #cbd5e1; }
   .tag.soldout { background: #b91c1c; color: #fff; }
   .tag.eb { background: #0f766e; color: #d1fae5; }
+  .tag.clash { background: #b45309; color: #fff; }
   .cardrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .dist b { color: var(--lime); font-weight: 700; }
   .kit { display: flex; gap: 4px; flex-shrink: 0; }
@@ -694,6 +695,10 @@ function render() {
     const eb = earlyBird(ev);
     const ebBadge = eb ? `<span class="tag eb">Early bird ${eb.days === 0 ? "ends today" : `ends in ${eb.days}d`}</span>` : "";
 
+    // Clash warnings arrive pre-computed from /api/events.
+    const clash = (ev.clashes ?? [])[0];
+    const clashBadge = clash ? `<span class="tag clash" title="${esc((ev.clashes ?? []).map((c) => `${c.title}: ${c.reason}`).join("; "))}">⚠ Clashes with ${esc(clash.title)}</span>` : "";
+
     const thumbs = kitThumbs(ev);
     const thumbsHtml = thumbs.length
       ? `<div class="kit">${thumbs
@@ -704,7 +709,7 @@ function render() {
     card.innerHTML = `
       <div class="thumb" ${ev.banner_url ? `style="background-image:url('${encodeURI(ev.banner_url)}')"` : ""}>
         ${ev.banner_url ? "" : '<span class="ph">🏁</span>'}
-        <div class="tags">${ebBadge}${tags.join("")}</div>
+        <div class="tags">${clashBadge}${ebBadge}${tags.join("")}</div>
       </div>
       <div class="body">
         <h4>${esc(ev.title)}</h4>

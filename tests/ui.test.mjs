@@ -317,3 +317,26 @@ test("drawer: kit image opens a lightbox and Escape closes it (Z6)", { skip }, a
   assert.ok(await page.locator("#scrim.open").count(), "drawer stays open under the lightbox");
   await page.close();
 });
+
+test("a clashing race shows a warning badge on its card (Z8)", { skip }, async () => {
+  const { saveEvent, saveMyRace } = await import("../db.mjs");
+  await saveEvent(ctx.db, {
+    id: "saved-race", title: "Saved Spring HM 2099", start_date: "2099-04-10", state: "Selangor", status: "open",
+    categories: [{ distance_km: 21 }], entitlements: [],
+    sources: [{ portal: "howei", source_url: "https://howei.com/event_details/saved" }],
+  });
+  await saveMyRace(ctx.db, { event_id: "saved-race", my_status: "registered" });
+  await saveEvent(ctx.db, {
+    id: "clashing-race", title: "Clashing Spring Run 2099", start_date: "2099-04-11", state: "Selangor", status: "open",
+    categories: [{ distance_km: 10 }], entitlements: [],
+    sources: [{ portal: "howei", source_url: "https://howei.com/event_details/clash" }],
+  });
+
+  const page = await browser.newPage();
+  await page.goto(base, { waitUntil: "networkidle" });
+  await page.waitForSelector('.card[data-id="clashing-race"]');
+  const badge = await page.locator('.card[data-id="clashing-race"] .tag.clash').allTextContents();
+  assert.equal(badge.length, 1);
+  assert.match(badge[0], /Clashes with Saved Spring HM 2099/);
+  await page.close();
+});

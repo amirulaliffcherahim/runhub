@@ -14,6 +14,7 @@ import {
   dbStats,
 } from "./db.mjs";
 import { runSync } from "./sync.mjs";
+import { annotateClashes } from "./clashes.mjs";
 
 const PORT = Number(process.env.PORT ?? 3300);
 // Single-user app: never expose the API beyond this machine / Tailscale.
@@ -59,11 +60,27 @@ export async function createApp({ dbPath, db: existing } = {}) {
     try {
       // ---- API ----
       if (path === "/api/events" && req.method === "GET") {
-        const events = await getEvents(db, {
-          state: url.searchParams.get("state") || undefined,
-          includeArchived: url.searchParams.get("archived") === "1",
-        });
-        return json(res, 200, events);
+        const [events, myRaces] = await Promise.all([
+          getEvents(db, {
+            state: url.searchParams.get("state") || undefined,
+            includeArchived: url.searchParams.get("archived") === "1",
+          }),
+          getMyRaces(db),
+        ]);
+        // Clash warnings are computed here so the card needs no extra request.
+        // The comparison needs the saved race's date and distance, not just its id.
+        const withTitles = await Promise.all(
+          myRaces.map(async (r) => {
+            const ev = await getEvent(db, r.event_id);
+            return {
+              ...r,
+              title: ev?.title ?? r.event_id,
+              start_date: ev?.start_date ?? null,
+              categories: ev?.categories ?? [],
+            };
+          })
+        );
+        return json(res, 200, annotateClashes(events, withTitles));
       }
 
       if (path.startsWith("/api/events/") && req.method === "GET") {
