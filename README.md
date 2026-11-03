@@ -60,6 +60,19 @@ Events live in Postgres. Nothing is deleted:
 - Sold-out and closed events are **never** hidden: only the date archives an event. Use the
   Availability filter (Open / Sold out / Reg. closed) to find them.
 
+## Politeness (do not remove)
+
+Every request goes through one choke point in `scrapers/fetch.mjs`:
+
+1. **robots.txt** is fetched and cached per host; disallowed paths are never requested.
+2. **Crawl-delay** is honoured per host (Howei declares 5s for `*`), capped at
+   `maxCrawlDelayMs` so one slow site cannot stall a sync.
+3. Requests to the same host are **serialised** with that gap - no burst of parallel hits.
+4. A **request budget** (`maxRequestsPerSync`, default 1500) stops a runaway loop.
+5. The AI crawler refuses hosts that declare `Content-Signal: ai-input=no` / `ai-train=no`.
+
+Tune it in the `politeness` block of `sources.json`.
+
 ## Known limits
 
 - CheckpointSpot is still behind Cloudflare (needs Playwright + credentials in `.env`).
@@ -70,7 +83,10 @@ Events live in Postgres. Nothing is deleted:
 
 ## Deploy (itsmini)
 
-- Path `~/code/runhub`, pm2 app `runhub` via `ecosystem.config.cjs`, bound to the Tailscale IP: `http://100.109.19.100:3300`.
+- Path `~/code/runhub`, pm2 app `runhub` via `ecosystem.config.cjs`.
+- `HOST` comes from `.env`. `HOST=0.0.0.0` serves `http://127.0.0.1:3300` (what cloudflared
+  uses), the Tailscale IP, and the LAN interface. ufw still gates the outside:
+  `default deny incoming` + `allow in on tailscale0 to any port 3300`.
 - **Do not start it with `pm2 start server.mjs`.** pm2's wrapper becomes `process.argv[1]`, so the `isMain`
   guard fails and nothing listens. The ecosystem file runs `node server.mjs` directly (`interpreter: "none"`).
 - Postgres: role+db `runhub` on the local server (port 5433); `DATABASE_URL` only in `.env` (0600).
