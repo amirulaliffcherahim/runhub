@@ -13,5 +13,8 @@
   },
   "devDependencies": {
     "playwright": "^1.45.0"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
   }
 }

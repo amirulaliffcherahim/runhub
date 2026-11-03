@@ -3,20 +3,23 @@ import { toIso } from "./dates.mjs";
 import { stripHtml } from "./html.mjs";
 import { pmap } from "./pool.mjs";
 import { urlFor } from "./config.mjs";
+import { statusFromText } from "./status.mjs";
 
 const BASE = "https://getbiib.com";
 
 /** `/events` card grid: <a href="/events/1808"> plus banner + title + blurb. */
 export function parseList(html) {
   const out = [];
+  // The card body ends with either a "Get Ticket" button or a "Registration is Closed" badge.
   const re =
-    /<a href="\/events\/(\d+)"><img[^>]+src="([^"]+)"[\s\S]*?<h4 class="card-title">([\s\S]*?)<\/h4>[\s\S]*?<p class="card-text">([\s\S]*?)<\/p>/g;
+    /<a href="\/events\/(\d+)"><img[^>]+src="([^"]+)"[\s\S]*?<h4 class="card-title">([\s\S]*?)<\/h4>[\s\S]*?<p class="card-text">([\s\S]*?)<\/p>([\s\S]*?)<\/div><\/div><\/div>/g;
   for (const m of html.matchAll(re)) {
     out.push({
       id: `biib-${m[1]}`,
       title: stripHtml(m[3]),
       banner_url: m[2],
       description: stripHtml(m[4]),
+      status: statusFromText(stripHtml(m[5])) ?? "open",
       sources: [{ portal: "biib", source_url: `${BASE}/events/${m[1]}` }],
     });
   }
@@ -24,7 +27,7 @@ export function parseList(html) {
 }
 
 /** Detail page: og tags carry the authoritative title/blurb/banner. */
-export function parseDetail(html, eventId, base = BASE) {
+export function parseDetail(html, eventId, base = BASE, listStatus = null) {
   const meta = (prop) =>
     (html.match(new RegExp(`property="${prop}" content="([^"]*)"`)) ?? [])[1] ?? null;
 
@@ -58,7 +61,7 @@ export function parseDetail(html, eventId, base = BASE) {
     state: null,
     venue,
     description: stripHtml(longDesc?.[1] ?? description) || null,
-    status: "open",
+    status: listStatus ?? "open",
     banner_url: banner,
     categories: distances.map((km) => ({
       distance_km: km,
@@ -106,7 +109,7 @@ export async function scrapeBiib(cfg = {}) {
         return stub; // keep the list-level data rather than drop the race
       }
       try {
-        return parseDetail(res.text, eventId, c.baseUrl);
+        return parseDetail(res.text, eventId, c.baseUrl, stub.status);
       } catch (e) {
         errors.push(`biib parse ${eventId}: ${e.message}`);
         return stub;

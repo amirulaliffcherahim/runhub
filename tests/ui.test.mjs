@@ -1,14 +1,11 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 import { createApp } from "../server.mjs";
-import { openDb, saveEvent, recordSyncRun } from "../db.mjs";
+import { saveEvent, recordSyncRun } from "../db.mjs";
+import { tempDb, pgAvailable } from "./helpers.mjs";
 
-// Playwright is a dev dependency; skip the suite rather than fail when the
-// browser binary has not been installed on this machine.
+// Playwright is a dev dependency; skip rather than fail when no browser is installed.
 let chromium = null;
 try {
   ({ chromium } = await import("playwright"));
@@ -16,12 +13,19 @@ try {
   chromium = null;
 }
 
-const dir = mkdtempSync(join(tmpdir(), "runhub-ui-"));
-const dbPath = join(dir, "ui.db");
+const pgOk = await pgAvailable();
+const skip = !pgOk ? "Postgres not reachable" : !chromium ? "playwright browser not installed" : false;
 
-{
-  const db = openDb(dbPath);
-  saveEvent(db, {
+let ctx;
+let server;
+let base;
+let browser;
+
+before(async () => {
+  if (skip) return;
+  ctx = await tempDb();
+
+  await saveEvent(ctx.db, {
     id: "klscm-2026",
     title: "Kuala Lumpur Standard Chartered Marathon 2026",
     organizer: "Dirigo",
@@ -45,7 +49,7 @@ const dbPath = join(dir, "ui.db");
       { portal: "howei", source_url: "https://howei.com/event_details/klscm" },
     ],
   });
-  saveEvent(db, {
+  await saveEvent(ctx.db, {
     id: "penang-2026",
     title: "Penang Bridge Fun Run 2026",
     start_date: "2099-11-15",
@@ -56,48 +60,62 @@ const dbPath = join(dir, "ui.db");
     entitlements: [],
     sources: [{ portal: "jomrun", source_url: "https://jomrun.com/event/penang" }],
   });
-  recordSyncRun(db, {
+  // A sold-out upcoming race and an archived past race.
+  await saveEvent(ctx.db, {
+    id: "soldout-2026",
+    title: "Sold Out Skyline Run 2026",
+    start_date: "2099-12-01",
+    state: "Selangor",
+    status: "sold_out",
+    categories: [{ distance_km: 10, label: "10km", price_normal: 60 }],
+    entitlements: [],
+    sources: [{ portal: "howei", source_url: "https://howei.com/event_details/soldout" }],
+  });
+  await saveEvent(ctx.db, {
+    id: "archived-2020",
+    title: "Archived Old Race 2020",
+    start_date: "2020-01-01",
+    state: "Perak",
+    status: "closed",
+    categories: [],
+    entitlements: [],
+    sources: [{ portal: "howei", source_url: "https://howei.com/event_details/archived" }],
+  });
+  await ctx.db.query("UPDATE events SET archived_at = '2026-01-01T00:00:00Z', archived_reason = 'date_passed' WHERE id = 'archived-2020'");
+
+  await recordSyncRun(ctx.db, {
     startedAt: "2026-01-01T00:00:00Z",
     finishedAt: new Date().toISOString(),
     portals: ["racexasia"],
-    counts: { unique: 2, categories: 3 },
+    counts: { unique: 3, categories: 4 },
     errors: [],
   });
-  db.close();
-}
 
-const server = createApp({ dbPath });
-let base;
-let browser;
-
-before(async () => {
+  server = await createApp({ db: ctx.db });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${server.address().port}`;
-  if (chromium) browser = await chromium.launch();
+  browser = await chromium.launch();
 });
 
 after(async () => {
   await browser?.close();
-  server.closeDb?.();
-  server.close();
-  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  if (server) server.close();
+  await ctx?.cleanup();
 });
 
-const skip = () => (chromium ? false : "playwright browser not installed");
-
-test("TC-UI-01: grid renders from the API, filters change the count, drawer shows entitlements (AC-10..12)", { skip: skip() }, async () => {
+test("TC-UI-01: grid renders from the API, filters change the count, drawer shows entitlements (AC-10..12)", { skip }, async () => {
   const page = await browser.newPage();
   await page.goto(base, { waitUntil: "networkidle" });
 
-  // AC-10: cards come from /api/events, not a hardcoded array.
+  // AC-10: cards come from /api/events, not a hardcoded array. Archived rows are hidden.
   await page.waitForSelector(".card");
-  assert.equal(await page.locator(".card").count(), 2);
-  assert.match(await page.locator("#count").textContent(), /2 of 2/);
+  assert.equal(await page.locator(".card").count(), 3);
+  assert.match(await page.locator("#count").textContent(), /3 of 3/);
 
   // AC-11: state filter narrows the result count.
   await page.selectOption("#stateSel", "Penang");
   await page.waitForFunction(() => document.querySelectorAll(".card").length === 1);
-  assert.match(await page.locator("#count").textContent(), /1 of 2/);
+  assert.match(await page.locator("#count").textContent(), /1 of 3/);
 
   // Distance filter: 42K must exclude the 5km fun run.
   await page.selectOption("#stateSel", "ALL");
@@ -105,8 +123,15 @@ test("TC-UI-01: grid renders from the API, filters change the count, drawer show
   await page.waitForFunction(() => document.querySelectorAll(".card").length === 1);
   assert.match(await page.locator(".card h4").first().textContent(), /Standard Chartered/);
 
-  // Search box.
+  // Availability filter surfaces the sold-out race.
   await page.click('#distChips button[data-dist="ALL"]');
+  await page.click('#availChips button[data-avail="sold_out"]');
+  await page.waitForFunction(() => document.querySelectorAll(".card").length === 1);
+  assert.match(await page.locator(".card h4").first().textContent(), /Sold Out Skyline/);
+  assert.ok(await page.locator(".card .tag.soldout").count(), "sold-out badge is visible");
+  await page.click('#availChips button[data-avail="ALL"]');
+
+  // Search box.
   await page.fill("#q", "penang");
   await page.waitForFunction(() => document.querySelectorAll(".card").length === 1);
   await page.fill("#q", "");
@@ -115,19 +140,30 @@ test("TC-UI-01: grid renders from the API, filters change the count, drawer show
   await page.click('.card[data-id="klscm-2026"]');
   await page.waitForSelector("#drawer .sect");
   const drawer = page.locator("#drawer");
-
   assert.equal(await drawer.locator(".buy").count(), 2, "both portals must be offered");
   assert.match(await drawer.textContent(), /RM120/, "normal price for the 21km tier");
   assert.match(await drawer.textContent(), /RM160/, "normal price for the 42km tier");
   assert.equal(await drawer.locator(".shot img").count(), 2, "tee + medal images");
   assert.match(await drawer.textContent(), /Mid Valley/, "race pack collection");
 
-  await page.click("#closeDrawer");
-  await page.waitForSelector("#scrim.open", { state: "detached" }).catch(() => {});
   await page.close();
 });
 
-test("TC-UI-02: Sync now shows progress, My Season persists via the API (AC-13, AC-14)", { skip: skip() }, async () => {
+test("archive is hidden by default and shown on request (nothing is deleted)", { skip }, async () => {
+  const page = await browser.newPage();
+  await page.goto(base, { waitUntil: "networkidle" });
+  await page.waitForSelector(".card");
+  assert.equal(await page.locator('.card[data-id="archived-2020"]').count(), 0);
+
+  await page.check("#showArchived");
+  await page.waitForFunction(() => document.querySelectorAll(".card").length === 4);
+  assert.equal(await page.locator('.card[data-id="archived-2020"]').count(), 1);
+  assert.ok(await page.locator('.card[data-id="archived-2020"] .tag.closed').count(), "Archived badge");
+
+  await page.close();
+});
+
+test("TC-UI-02: sync status and My Season persist via the API (AC-13, AC-14)", { skip }, async () => {
   const page = await browser.newPage();
   await page.goto(base, { waitUntil: "networkidle" });
   await page.waitForSelector(".card");
@@ -159,7 +195,6 @@ test("TC-UI-02: Sync now shows progress, My Season persists via the API (AC-13, 
   await page.waitForSelector(".pace");
   assert.match(await page.locator(".pace").textContent(), /5:00 \/km/, "0:25 over 5km is 5:00/km");
 
-  // Unstar removes it server-side too.
   await page.click("#closeSeason");
   await page.click('.card[data-id="penang-2026"] .star');
   await page.waitForFunction(() => document.querySelector("#seasonBadge").textContent === "0");
@@ -168,9 +203,9 @@ test("TC-UI-02: Sync now shows progress, My Season persists via the API (AC-13, 
   await page.close();
 });
 
-test("empty DB shows the empty state, not a crash (AC-10 boundary)", { skip: skip() }, async () => {
-  const emptyDir = mkdtempSync(join(tmpdir(), "runhub-empty-"));
-  const emptyServer = createApp({ dbPath: join(emptyDir, "e.db") });
+test("empty DB shows the empty state, not a crash (AC-10 boundary)", { skip }, async () => {
+  const empty = await tempDb();
+  const emptyServer = await createApp({ db: empty.db });
   await new Promise((r) => emptyServer.listen(0, "127.0.0.1", r));
   const emptyBase = `http://127.0.0.1:${emptyServer.address().port}`;
 
@@ -180,7 +215,6 @@ test("empty DB shows the empty state, not a crash (AC-10 boundary)", { skip: ski
   assert.equal(await page.locator(".card").count(), 0);
 
   await page.close();
-  emptyServer.closeDb?.();
   emptyServer.close();
-  rmSync(emptyDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await empty.cleanup();
 });

@@ -283,3 +283,64 @@ test("fetchWithRetry retries 5xx/429 with backoff but returns 404 immediately", 
     srv.close();
   }
 });
+
+// ---------- sold-out / closed events are kept ----------
+import { statusFromText, isPastDate } from "../scrapers/status.mjs";
+import { parseListStatus as rxListStatus } from "../scrapers/racexasia.mjs";
+import { parseList as biibListFn } from "../scrapers/biib.mjs";
+import { parseListing as t2uParse } from "../scrapers/ticket2u.mjs";
+import { runSync } from "../sync.mjs";
+import { openDb } from "../db.mjs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+test("statusFromText recognises sold out / closed / cancelled in English and Malay", () => {
+  assert.equal(statusFromText("SOLD OUT"), "sold_out");
+  assert.equal(statusFromText("Sold-out! see you next year"), "sold_out");
+  assert.equal(statusFromText("Fully subscribed"), "sold_out");
+  assert.equal(statusFromText("Tiket habis dijual"), "sold_out");
+  assert.equal(statusFromText("Registration is Closed"), "closed");
+  assert.equal(statusFromText("Puchong Half Marathon (EVENT CANCEL)"), "cancelled");
+  assert.equal(statusFromText("Run on 26 December 2026, 6.30am"), null);
+  assert.equal(statusFromText(null), null);
+});
+
+test("isPastDate is about the calendar only, never about status", () => {
+  const now = new Date("2026-11-10T00:00:00Z");
+  assert.equal(isPastDate("2026-11-09", now), true);
+  assert.equal(isPastDate("2026-11-20", now), false);
+  assert.equal(isPastDate(null, now), false);
+});
+
+test("racexasia: list-page ticket icon marks closed vs open per card", () => {
+  const html = `
+    <div class="event"><a href="/event/aaa-run" class="title">A</a>
+      <i class="fa fa-ticket-alt status closed" title="Closed"></i></div>
+    <div class="event"><a href="/event/bbb-run" class="title">B</a>
+      <i class="fa fa-ticket-alt status open" title="Open"></i></div>`;
+  const m = rxListStatus(html);
+  assert.equal(m.get("aaa-run"), "closed");
+  assert.equal(m.get("bbb-run"), "open");
+});
+
+test("biib: list card badge 'Registration is Closed' becomes status closed; ticket button stays open", () => {
+  const card = (id, title, tail) =>
+    `<div class="col-sm-6"><div class="card"><a href="/events/${id}"><img class="card-img-top" src="https://x/${id}.jpg" /></a><div class="card-body"><h4 class="card-title">${title}</h4><p class="card-text">blurb</p>${tail}</div></div></div>`;
+  const html =
+    card(1, "Open Run", '<a class="btn btn-primary" href="/events/1">Get Ticket</a>') +
+    card(2, "Shut Run", '<div class="badge badge-danger">Registration is Closed</div>');
+  const out = biibListFn(html);
+  assert.equal(out.length, 2);
+  assert.equal(out[0].status, "open");
+  assert.equal(out[1].status, "closed");
+});
+
+test("ticket2u: sale-ended upcoming event is closed but still emitted", () => {
+  const mkRow = (over) => ({ row: { id: "1", name: "X Run", link: "/event/1/x-run", datefrom: "2027-01-01T07:00:00", status: "upcoming", issaleend: "0", ...over } });
+  const out = t2uParse({ data: [mkRow({}), mkRow({ id: "2", issaleend: "1" }), mkRow({ id: "3", status: "expired" })] });
+  assert.deepEqual(out.map((e) => e.status), ["open", "closed", "closed"]);
+});
+
+// The end-to-end "sold-out events survive a sync" case lives in tests/sync.test.mjs,
+// which runs against Postgres (this file stays DB-free).

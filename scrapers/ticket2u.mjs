@@ -26,7 +26,8 @@ export function parseListing(json) {
       state: row.statename || null,
       venue: row.locname || null,
       description: row.excerpt || null,
-      status: row.status === "expired" ? "closed" : "open",
+      // `expired` = date passed. `issaleend` = sales over while the event is still ahead.
+      status: row.status === "expired" ? "closed" : String(row.issaleend) === "1" ? "closed" : "open",
       banner_url: row.avatar || null,
       categories:
         Number.isFinite(price) && price > 0

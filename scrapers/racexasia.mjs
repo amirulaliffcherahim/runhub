@@ -3,6 +3,7 @@ import { parsePhpDump } from "./phpdump.mjs";
 import { stripHtml } from "./html.mjs";
 import { pmap, settle } from "./pool.mjs";
 import { urlFor } from "./config.mjs";
+import { statusFromText } from "./status.mjs";
 
 const BASE = "https://www.racexasia.com";
 
@@ -10,6 +11,22 @@ const BASE = "https://www.racexasia.com";
 export function parseList(html) {
   const slugs = [...html.matchAll(/href="\/event\/([a-z0-9-]+)"/g)].map((m) => m[1]);
   return [...new Set(slugs)];
+}
+
+/**
+ * Registration state per slug from the list page: each card has
+ * `<i class="... status closed" title="Closed">` when sales are closed.
+ * Returns Map(slug -> "closed" | "open").
+ */
+export function parseListStatus(html) {
+  const out = new Map();
+  for (const card of html.split('<div class="event">').slice(1)) {
+    const slug = (card.match(/href="\/event\/([a-z0-9-]+)"/) ?? [])[1];
+    if (!slug) continue;
+    const closed = /fa-ticket-alt status closed|title="Closed"/i.test(card);
+    out.set(slug, closed ? "closed" : "open");
+  }
+  return out;
 }
 
 /** Map one RaceXasia detail page to the normalised event shape. */
@@ -62,7 +79,7 @@ export function parseDetail(html, slug, base = BASE) {
     state: null,
     venue: stripHtml(d.venue) || null,
     description: stripHtml(d.description) || null,
-    status: /available/i.test(info.status ?? "") ? "open" : (info.status ?? null),
+    status: statusFromText(info.status) ?? (/available/i.test(info.status ?? "") ? "open" : (info.status ?? null)),
     banner_url: info.main_banner ?? null,
     categories,
     entitlements,
@@ -84,10 +101,14 @@ export async function scrapeRaceXasia(cfg = {}) {
   const opts = { timeoutMs: c.timeoutMs };
   const errors = [];
   const slugs = new Set();
+  const listStatus = new Map();
 
   for (const p of c.listPaths) {
     const list = await fetchWithRetry(urlFor(c, p), c.retries, opts);
-    if (list.status === 200) parseList(list.text).forEach((s) => slugs.add(s));
+    if (list.status === 200) {
+      parseList(list.text).forEach((s) => slugs.add(s));
+      for (const [slug, st] of parseListStatus(list.text)) listStatus.set(slug, st);
+    }
     else errors.push(`racexasia list ${p}: ${list.status}`);
   }
   if (!slugs.size) throw new Error(`racexasia: no events (${errors.join("; ") || "empty list"})`);
@@ -98,7 +119,10 @@ export async function scrapeRaceXasia(cfg = {}) {
     async (slug) => {
       const res = await fetchWithRetry(`${c.baseUrl}/event/${slug}`, c.retries, opts);
       if (res.status !== 200) throw new Error(`${res.status}`);
-      return parseDetail(res.text, slug, c.baseUrl);
+      const ev = parseDetail(res.text, slug, c.baseUrl);
+      // The list-page ticket icon is the authoritative open/closed signal on RaceXasia.
+      if (listStatus.get(slug) === "closed" && ev.status === "open") ev.status = "closed";
+      return ev;
     },
     c.concurrency
   );

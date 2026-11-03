@@ -1,64 +1,89 @@
-import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
+/**
+ * Postgres data layer (node-postgres `pg`). The only runtime dependency.
+ *
+ * Connection: `DATABASE_URL` (from .env / pm2 env). Never hard-code credentials.
+ * Tests point at a throwaway schema via `createDb({ schema })`, so they can run
+ * against the same server without touching real data.
+ *
+ * Lifecycle of an event:
+ *   active    - upcoming, or within `ARCHIVE_GRACE_DAYS` of its date
+ *   archived  - date + grace days has passed. Row and children stay in the DB,
+ *               but API/UI hide them by default.
+ *   delisted  - the source stopped listing it. Kept and archived, never deleted.
+ */
+import pg from "pg";
+import { readFileSync } from "node:fs";
 
-// Located at a function so tests can point at a temp file.
-export function openDb(path = "data/runhub.db") {
-  mkdirSync(path.replace(/[\\/][^\\/]+$/, ""), { recursive: true });
-  const db = new DatabaseSync(path);
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec(SCHEMA);
-  migrate(db);
-  return db;
-}
+const { Pool } = pg;
 
-// Idempotent column adds for DBs created before these fields existed.
-const NEW_EVENT_COLS = ["race_pack", "key_dates", "registration_deadline", "last_seen_at"];
-function migrate(db) {
-  const have = new Set(db.prepare("PRAGMA table_info(events)").all().map((c) => c.name));
-  for (const col of NEW_EVENT_COLS) {
-    if (!have.has(col)) db.exec(`ALTER TABLE events ADD COLUMN ${col} TEXT`);
+/** Days after the event date before an event moves to the archive. */
+export const ARCHIVE_GRACE_DAYS = Number(process.env.ARCHIVE_GRACE_DAYS ?? 7);
+
+/** Minimal .env reader (no dependency). Existing process.env wins. */
+export function loadEnv(path = new URL("./.env", import.meta.url)) {
+  let raw;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return;
+  }
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line || line.startsWith("#")) continue;
+    const i = line.indexOf("=");
+    if (i < 1) continue;
+    const key = line.slice(0, i).trim();
+    if (!process.env[key]) process.env[key] = line.slice(i + 1).trim();
   }
 }
 
+loadEnv();
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
-  id            TEXT PRIMARY KEY,
-  title         TEXT NOT NULL,
-  organizer     TEXT,
-  start_date    TEXT,
-  end_date      TEXT,
-  state         TEXT,
-  venue         TEXT,
-  description   TEXT,
-  status        TEXT,
-  banner_url    TEXT,
-  first_seen_at TEXT,
-  updated_at    TEXT
+  id                    TEXT PRIMARY KEY,
+  title                 TEXT NOT NULL,
+  organizer             TEXT,
+  start_date            TEXT,
+  end_date              TEXT,
+  state                 TEXT,
+  venue                 TEXT,
+  description           TEXT,
+  status                TEXT,
+  banner_url            TEXT,
+  race_pack             TEXT,
+  key_dates             TEXT,
+  registration_deadline TEXT,
+  origin                TEXT,
+  first_seen_at         TEXT,
+  updated_at            TEXT,
+  last_seen_at          TEXT,
+  archived_at           TEXT,
+  archived_reason       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS event_sources (
-  event_id   TEXT NOT NULL REFERENCES events(id),
+  event_id   TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   portal     TEXT NOT NULL,
   source_url TEXT NOT NULL,
   PRIMARY KEY (event_id, portal)
 );
 
 CREATE TABLE IF NOT EXISTS categories (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  event_id     TEXT NOT NULL REFERENCES events(id),
-  distance_km  REAL,
-  label        TEXT,
-  price_early  REAL,
-  price_normal REAL,
-  price_note   TEXT,
-  cutoff_time  TEXT,
+  id            SERIAL PRIMARY KEY,
+  event_id      TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  distance_km   DOUBLE PRECISION,
+  label         TEXT,
+  price_early   DOUBLE PRECISION,
+  price_normal  DOUBLE PRECISION,
+  price_note    TEXT,
+  cutoff_time   TEXT,
   flag_off_time TEXT,
-  status       TEXT
+  status        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS entitlements (
-  id        INTEGER PRIMARY KEY AUTOINCREMENT,
-  event_id  TEXT NOT NULL REFERENCES events(id),
+  id        SERIAL PRIMARY KEY,
+  event_id  TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   kind      TEXT,
   title     TEXT,
   image_url TEXT,
@@ -66,16 +91,16 @@ CREATE TABLE IF NOT EXISTS entitlements (
 );
 
 CREATE TABLE IF NOT EXISTS my_races (
-  event_id       TEXT PRIMARY KEY REFERENCES events(id),
-  my_status      TEXT,
+  event_id        TEXT PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
+  my_status       TEXT,
   target_distance TEXT,
-  target_time    TEXT,
-  shirt_size     TEXT,
-  notes          TEXT
+  target_time     TEXT,
+  shirt_size      TEXT,
+  notes           TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sync_runs (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  id          SERIAL PRIMARY KEY,
   started_at  TEXT,
   finished_at TEXT,
   portals     TEXT,
@@ -85,145 +110,55 @@ CREATE TABLE IF NOT EXISTS sync_runs (
 
 CREATE INDEX IF NOT EXISTS idx_categories_event ON categories(event_id);
 CREATE INDEX IF NOT EXISTS idx_entitlements_event ON entitlements(event_id);
+CREATE INDEX IF NOT EXISTS idx_events_start ON events(start_date);
+CREATE INDEX IF NOT EXISTS idx_events_archived ON events(archived_at);
+CREATE INDEX IF NOT EXISTS idx_sources_url ON event_sources(source_url);
 `;
+
+/** Columns added after the first release; applied idempotently to existing DBs. */
+const MIGRATIONS = [
+  ["race_pack", "TEXT"],
+  ["key_dates", "TEXT"],
+  ["registration_deadline", "TEXT"],
+  ["origin", "TEXT"],
+  ["last_seen_at", "TEXT"],
+  ["archived_at", "TEXT"],
+  ["archived_reason", "TEXT"],
+];
 
 const now = () => new Date().toISOString();
 
 /**
- * Upsert one event plus its children. Idempotent: re-running refreshes
- * `updated_at` and never duplicates rows.
- * Child rows (categories, entitlements) are replaced wholesale on each upsert
- * so a re-sync cannot accumulate stale duplicates.
+ * Open a pool and make sure the schema exists.
+ * `schema` (tests) isolates everything inside a throwaway Postgres schema.
  */
-export function saveEvent(db, event) {
-  db.exec("BEGIN");
-  try {
-    saveEventInner(db, event);
-    db.exec("COMMIT");
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
-  }
-}
+export async function openDb({ connectionString = process.env.DATABASE_URL, schema = null } = {}) {
+  if (!connectionString) throw new Error("DATABASE_URL is not set (see .env.example)");
 
-function saveEventInner(db, event) {
-  const ts = now();
-  // Stable id: if any source URL is already known, keep that event row so a
-  // richer portal appearing later does not spawn a duplicate (or orphan my_races).
-  for (const s of event.sources ?? []) {
-    const known = db
-      .prepare("SELECT event_id FROM event_sources WHERE source_url = ?")
-      .get(s.source_url);
-    if (known) {
-      event = { ...event, id: known.event_id };
-      break;
-    }
-  }
-  const existing = db
-    .prepare("SELECT first_seen_at FROM events WHERE id = ?")
-    .get(event.id);
-
-  db.prepare(
-    `INSERT INTO events (id, title, organizer, start_date, end_date, state, venue,
-        description, status, banner_url, first_seen_at, updated_at,
-        race_pack, key_dates, registration_deadline, last_seen_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       title=excluded.title, organizer=excluded.organizer,
-       start_date=excluded.start_date, end_date=excluded.end_date,
-       state=excluded.state, venue=excluded.venue,
-       description=excluded.description, status=excluded.status,
-       banner_url=excluded.banner_url, updated_at=excluded.updated_at,
-       race_pack=excluded.race_pack, key_dates=excluded.key_dates,
-       registration_deadline=excluded.registration_deadline,
-       last_seen_at=excluded.last_seen_at`
-  ).run(
-    event.id,
-    event.title ?? null,
-    event.organizer ?? null,
-    event.start_date ?? null,
-    event.end_date ?? null,
-    event.state ?? null,
-    event.venue ?? null,
-    event.description ?? null,
-    event.status ?? null,
-    event.banner_url ?? null,
-    existing?.first_seen_at ?? ts,
-    ts,
-    event.race_pack?.length ? JSON.stringify(event.race_pack) : null,
-    event.key_dates?.length ? JSON.stringify(event.key_dates) : null,
-    event.registration_deadline ?? null,
-    ts
-  );
-
-  db.prepare("DELETE FROM categories WHERE event_id = ?").run(event.id);
-  for (const c of event.categories ?? []) {
-    db.prepare(
-      `INSERT INTO categories (event_id, distance_km, label, price_early,
-          price_normal, price_note, cutoff_time, flag_off_time, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      event.id,
-      c.distance_km ?? null,
-      c.label ?? null,
-      c.price_early ?? null,
-      c.price_normal ?? null,
-      c.price_note ?? null,
-      c.cutoff_time ?? null,
-      c.flag_off_time ?? null,
-      c.status ?? null
-    );
-  }
-
-  db.prepare("DELETE FROM entitlements WHERE event_id = ?").run(event.id);
-  for (const e of event.entitlements ?? []) {
-    db.prepare(
-      `INSERT INTO entitlements (event_id, kind, title, image_url, notes)
-       VALUES (?, ?, ?, ?, ?)`
-    ).run(
-      event.id,
-      e.kind ?? null,
-      e.title ?? null,
-      e.image_url ?? null,
-      e.notes ?? null
-    );
-  }
-
-  for (const s of event.sources ?? []) {
-    db.prepare(
-      `INSERT INTO event_sources (event_id, portal, source_url)
-       VALUES (?, ?, ?)
-       ON CONFLICT(event_id, portal) DO UPDATE SET source_url=excluded.source_url`
-    ).run(event.id, s.portal, s.source_url);
-  }
-}
-
-export function getEvents(db, { state } = {}) {
-  const rows = state
-    ? db.prepare("SELECT * FROM events WHERE state = ? ORDER BY start_date").all(state)
-    : db.prepare("SELECT * FROM events ORDER BY start_date").all();
-
-  // The list view filters on distance and entitlement tier, so it needs the
-  // children too. Group them in one pass instead of a query per event.
-  const group = (sql) => {
-    const map = new Map();
-    for (const row of db.prepare(sql).all()) {
-      const { event_id, ...rest } = row;
-      if (!map.has(event_id)) map.set(event_id, []);
-      map.get(event_id).push(rest);
-    }
-    return (id) => map.get(id) ?? [];
+  const pool = new Pool({ connectionString, max: 4 });
+  const db = {
+    pool,
+    schema,
+    query: (text, params) => pool.query(text, params),
+    async close() {
+      await pool.end();
+    },
   };
-  const src = group("SELECT event_id, portal, source_url FROM event_sources");
-  const cats = group("SELECT * FROM categories ORDER BY distance_km");
-  const ents = group("SELECT * FROM entitlements ORDER BY id");
 
-  for (const r of rows) {
-    r.sources = src(r.id);
-    r.categories = cats(r.id);
-    r.entitlements = ents(r.id);
+  if (schema) {
+    // Identifiers cannot be parameterised; the name is generated by our own tests.
+    if (!/^[a-z_][a-z0-9_]*$/.test(schema)) throw new Error(`invalid schema name: ${schema}`);
+    await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await pool.query(`CREATE SCHEMA ${schema}`);
+    await pool.query(`SET search_path TO ${schema}`);
+    pool.on("connect", (c) => c.query(`SET search_path TO ${schema}`));
   }
-  return rows;
+
+  await pool.query(SCHEMA);
+  for (const [col, type] of MIGRATIONS) {
+    await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS ${col} ${type}`);
+  }
+  return db;
 }
 
 const parseJson = (v) => {
@@ -234,101 +169,260 @@ const parseJson = (v) => {
   }
 };
 
-export function getEvent(db, id) {
-  const event = db.prepare("SELECT * FROM events WHERE id = ?").get(id);
-  if (!event) return null;
-  event.race_pack = parseJson(event.race_pack);
-  event.key_dates = parseJson(event.key_dates);
-  event.categories = db
-    .prepare("SELECT * FROM categories WHERE event_id = ? ORDER BY distance_km")
-    .all(id);
-  event.entitlements = db
-    .prepare("SELECT * FROM entitlements WHERE event_id = ? ORDER BY id")
-    .all(id);
-  event.sources = db
-    .prepare("SELECT portal, source_url FROM event_sources WHERE event_id = ?")
-    .all(id);
+const parseRow = (row) => {
+  if (!row) return row;
+  return { ...row, race_pack: parseJson(row.race_pack), key_dates: parseJson(row.key_dates) };
+};
+
+/**
+ * Upsert one event plus its children, in a single transaction.
+ * Idempotent: re-running refreshes `updated_at` and never duplicates rows.
+ * Children are replaced wholesale so a re-sync cannot accumulate stale rows.
+ */
+export async function saveEvent(db, event) {
+  const client = await db.pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Stable id: a known source URL wins, so a richer portal appearing later
+    // updates the existing row instead of spawning a duplicate.
+    let id = event.id;
+    for (const s of event.sources ?? []) {
+      const known = await client.query("SELECT event_id FROM event_sources WHERE source_url = $1 LIMIT 1", [s.source_url]);
+      if (known.rowCount) {
+        id = known.rows[0].event_id;
+        break;
+      }
+    }
+
+    const ts = now();
+    const existing = await client.query("SELECT first_seen_at FROM events WHERE id = $1", [id]);
+
+    await client.query(
+      `INSERT INTO events (id, title, organizer, start_date, end_date, state, venue,
+          description, status, banner_url, first_seen_at, updated_at,
+          race_pack, key_dates, registration_deadline, origin, last_seen_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+       ON CONFLICT (id) DO UPDATE SET
+         title=EXCLUDED.title, organizer=EXCLUDED.organizer,
+         start_date=EXCLUDED.start_date, end_date=EXCLUDED.end_date,
+         state=EXCLUDED.state, venue=EXCLUDED.venue,
+         description=EXCLUDED.description, status=EXCLUDED.status,
+         banner_url=EXCLUDED.banner_url, updated_at=EXCLUDED.updated_at,
+         race_pack=EXCLUDED.race_pack, key_dates=EXCLUDED.key_dates,
+         registration_deadline=EXCLUDED.registration_deadline,
+         origin=COALESCE(events.origin, EXCLUDED.origin),
+         last_seen_at=EXCLUDED.last_seen_at,
+         archived_at=NULL, archived_reason=NULL`,
+      [
+        id,
+        event.title ?? null,
+        event.organizer ?? null,
+        event.start_date ?? null,
+        event.end_date ?? null,
+        event.state ?? null,
+        event.venue ?? null,
+        event.description ?? null,
+        event.status ?? null,
+        event.banner_url ?? null,
+        existing.rows[0]?.first_seen_at ?? ts,
+        ts,
+        event.race_pack?.length ? JSON.stringify(event.race_pack) : null,
+        event.key_dates?.length ? JSON.stringify(event.key_dates) : null,
+        event.registration_deadline ?? null,
+        event.origin ?? null,
+        ts,
+      ]
+    );
+
+    await client.query("DELETE FROM categories WHERE event_id = $1", [id]);
+    for (const c of event.categories ?? []) {
+      await client.query(
+        `INSERT INTO categories (event_id, distance_km, label, price_early, price_normal,
+            price_note, cutoff_time, flag_off_time, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [
+          id,
+          c.distance_km ?? null,
+          c.label ?? null,
+          c.price_early ?? null,
+          c.price_normal ?? null,
+          c.price_note ?? null,
+          c.cutoff_time ?? null,
+          c.flag_off_time ?? null,
+          c.status ?? null,
+        ]
+      );
+    }
+
+    await client.query("DELETE FROM entitlements WHERE event_id = $1", [id]);
+    for (const e of event.entitlements ?? []) {
+      await client.query(
+        `INSERT INTO entitlements (event_id, kind, title, image_url, notes)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [id, e.kind ?? null, e.title ?? null, e.image_url ?? null, e.notes ?? null]
+      );
+    }
+
+    for (const s of event.sources ?? []) {
+      await client.query(
+        `INSERT INTO event_sources (event_id, portal, source_url)
+         VALUES ($1,$2,$3)
+         ON CONFLICT (event_id, portal) DO UPDATE SET source_url=EXCLUDED.source_url`,
+        [id, s.portal, s.source_url]
+      );
+    }
+
+    await client.query("COMMIT");
+    return id;
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/** Attach sources/categories/entitlements to a list of events with 3 queries, not 3N. */
+async function attachChildren(db, rows) {
+  if (!rows.length) return rows;
+  const ids = rows.map((r) => r.id);
+  const [src, cats, ents] = await Promise.all([
+    db.query("SELECT event_id, portal, source_url FROM event_sources WHERE event_id = ANY($1)", [ids]),
+    db.query("SELECT * FROM categories WHERE event_id = ANY($1) ORDER BY distance_km", [ids]),
+    db.query("SELECT * FROM entitlements WHERE event_id = ANY($1) ORDER BY id", [ids]),
+  ]);
+  const group = (list) => {
+    const m = new Map();
+    for (const { event_id, ...rest } of list) {
+      if (!m.has(event_id)) m.set(event_id, []);
+      m.get(event_id).push(rest);
+    }
+    return (id) => m.get(id) ?? [];
+  };
+  const s = group(src.rows);
+  const c = group(cats.rows);
+  const e = group(ents.rows);
+  for (const r of rows) {
+    r.sources = s(r.id);
+    r.categories = c(r.id);
+    r.entitlements = e(r.id);
+  }
+  return rows;
+}
+
+/**
+ * List events. Archived rows are excluded unless `includeArchived` is set.
+ * `state` narrows to one state.
+ */
+export async function getEvents(db, { state, includeArchived = false } = {}) {
+  const where = [];
+  const params = [];
+  if (!includeArchived) where.push("archived_at IS NULL");
+  if (state) {
+    params.push(state);
+    where.push(`state = $${params.length}`);
+  }
+  const sql = `SELECT * FROM events ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY start_date NULLS LAST`;
+  const { rows } = await db.query(sql, params);
+  return attachChildren(db, rows.map(parseRow));
+}
+
+/** One event with nested children. Archived events are still readable by id. */
+export async function getEvent(db, id) {
+  const { rows } = await db.query("SELECT * FROM events WHERE id = $1", [id]);
+  if (!rows.length) return null;
+  const [event] = await attachChildren(db, [parseRow(rows[0])]);
   return event;
 }
 
 /**
- * Drop events that no longer appear on any portal.
- *
- * Only events whose every source portal ran successfully this sync are eligible:
- * if a portal timed out we cannot tell "gone" from "unreachable", so its events
- * are kept. Rows in `my_races` also pin an event, so a saved race is never lost.
- * Returns the number of events removed.
+ * Move events whose date + grace days has passed into the archive.
+ * The row and its children stay in the DB; only visibility changes.
+ * Returns the number archived.
  */
-export function pruneStale(db, { seenIds, portalsRun }) {
-  const seen = new Set(seenIds);
+export async function archiveExpired(db, { graceDays = ARCHIVE_GRACE_DAYS, now: at = new Date() } = {}) {
+  const cutoff = new Date(at);
+  cutoff.setDate(cutoff.getDate() - graceDays);
+  const { rowCount } = await db.query(
+    `UPDATE events SET archived_at = $1, archived_reason = 'date_passed'
+     WHERE archived_at IS NULL AND start_date IS NOT NULL AND start_date < $2`,
+    [now(), cutoff.toISOString().slice(0, 10)]
+  );
+  return rowCount;
+}
+
+/**
+ * Events that vanished from a portal are archived, never deleted, so history and
+ * `my_races` survive. Only events whose every source portal ran successfully this
+ * sync are eligible: if a portal timed out we cannot tell "gone" from "unreachable".
+ * Returns the number archived.
+ */
+export async function archiveStale(db, { seenIds, portalsRun }) {
+  const { rows } = await db.query(
+    `SELECT e.id, array_agg(s.portal) AS portals
+       FROM events e JOIN event_sources s ON s.event_id = e.id
+      WHERE e.archived_at IS NULL AND NOT (e.id = ANY($1))
+      GROUP BY e.id`,
+    [seenIds]
+  );
   const ran = new Set(portalsRun);
-  const portalsOf = db.prepare("SELECT portal FROM event_sources WHERE event_id = ?");
-  const saved = new Set(db.prepare("SELECT event_id FROM my_races").all().map((r) => r.event_id));
-
-  const stale = [];
-  for (const { id } of db.prepare("SELECT id FROM events").all()) {
-    if (seen.has(id) || saved.has(id)) continue;
-    const portals = portalsOf.all(id).map((r) => r.portal);
-    if (portals.length && portals.every((p) => ran.has(p))) stale.push(id);
-  }
-
+  const stale = rows.filter((r) => r.portals.length && r.portals.every((p) => ran.has(p))).map((r) => r.id);
   if (!stale.length) return 0;
 
-  const delCats = db.prepare("DELETE FROM categories WHERE event_id = ?");
-  const delEnts = db.prepare("DELETE FROM entitlements WHERE event_id = ?");
-  const delSrcs = db.prepare("DELETE FROM event_sources WHERE event_id = ?");
-  const delEvent = db.prepare("DELETE FROM events WHERE id = ?");
-
-  db.exec("BEGIN");
-  try {
-    for (const id of stale) {
-      delCats.run(id);
-      delEnts.run(id);
-      delSrcs.run(id);
-      delEvent.run(id);
-    }
-    db.exec("COMMIT");
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
-  }
-  return stale.length;
+  const { rowCount } = await db.query(
+    `UPDATE events SET archived_at = $1, archived_reason = 'delisted'
+     WHERE id = ANY($2) AND archived_at IS NULL`,
+    [now(), stale]
+  );
+  return rowCount;
 }
 
-export function saveMyRace(db, r) {
-  db.prepare(
+export async function saveMyRace(db, r) {
+  await db.query(
     `INSERT INTO my_races (event_id, my_status, target_distance, target_time, shirt_size, notes)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(event_id) DO UPDATE SET
-       my_status=excluded.my_status,
-       target_distance=excluded.target_distance,
-       target_time=excluded.target_time,
-       shirt_size=excluded.shirt_size,
-       notes=excluded.notes`
-  ).run(
-    r.event_id,
-    r.my_status ?? null,
-    r.target_distance ?? null,
-    r.target_time ?? null,
-    r.shirt_size ?? null,
-    r.notes ?? null
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (event_id) DO UPDATE SET
+       my_status=EXCLUDED.my_status,
+       target_distance=EXCLUDED.target_distance,
+       target_time=EXCLUDED.target_time,
+       shirt_size=EXCLUDED.shirt_size,
+       notes=EXCLUDED.notes`,
+    [
+      r.event_id,
+      r.my_status ?? null,
+      r.target_distance ?? null,
+      r.target_time ?? null,
+      r.shirt_size ?? null,
+      r.notes ?? null,
+    ]
   );
 }
 
-export const getMyRaces = (db) => db.prepare("SELECT * FROM my_races").all();
+export const getMyRaces = async (db) => (await db.query("SELECT * FROM my_races")).rows;
 
-export const lastSyncRun = (db) =>
-  db.prepare("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1").get() ?? null;
+export const deleteMyRace = async (db, eventId) => {
+  await db.query("DELETE FROM my_races WHERE event_id = $1", [eventId]);
+};
 
-export function recordSyncRun(db, { startedAt, finishedAt, portals, counts, errors }) {
-  db.prepare(
+export const lastSyncRun = async (db) =>
+  (await db.query("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1")).rows[0] ?? null;
+
+export async function recordSyncRun(db, { startedAt, finishedAt, portals, counts, errors }) {
+  await db.query(
     `INSERT INTO sync_runs (started_at, finished_at, portals, counts, errors)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(
-    startedAt,
-    finishedAt,
-    JSON.stringify(portals),
-    JSON.stringify(counts),
-    JSON.stringify(errors)
+     VALUES ($1,$2,$3,$4,$5)`,
+    [startedAt, finishedAt, JSON.stringify(portals), JSON.stringify(counts), JSON.stringify(errors)]
   );
+}
+
+/** Counts used by /api/sync/status and the footer. */
+export async function dbStats(db) {
+  const { rows } = await db.query(
+    `SELECT count(*)::int AS total,
+            count(*) FILTER (WHERE archived_at IS NULL)::int AS active,
+            count(*) FILTER (WHERE archived_at IS NOT NULL)::int AS archived
+       FROM events`
+  );
+  return rows[0];
 }

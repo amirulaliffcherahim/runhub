@@ -156,6 +156,7 @@
   }
   .tag.new { background: var(--accent); color: #fff; }
   .tag.closed { background: #334155; color: #cbd5e1; }
+  .tag.soldout { background: #b91c1c; color: #fff; }
   .card .body { padding: 13px 14px 0; flex: 1; }
   .card h4 { margin: 0 0 6px; font-size: 15px; line-height: 1.3; font-weight: 800; }
   .meta { font-size: 11.5px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -339,7 +340,17 @@
         <label>State</label>
         <select id="stateSel"><option value="ALL">All states</option></select>
       </div>
+      <div class="field">
+        <label>Availability</label>
+        <div id="availChips" style="display:flex;gap:5px;flex-wrap:wrap">
+          <button class="chip on" data-avail="ALL">All</button>
+          <button class="chip" data-avail="open">Open</button>
+          <button class="chip" data-avail="sold_out">Sold out</button>
+          <button class="chip" data-avail="closed">Reg. closed</button>
+        </div>
+      </div>
       <label class="toggle"><input type="checkbox" id="showPast" /> include past</label>
+      <label class="toggle"><input type="checkbox" id="showArchived" /> show archive</label>
     </div>
   </div>
 
@@ -411,7 +422,7 @@ const GLOBAL_KIT = /\b(asics|adidas|nike|puma|new balance|under armour|hoka|sauc
 const state = {
   events: [],
   myRaces: [],
-  filters: { q: "", year: "ALL", dist: "ALL", tier: "ALL", state: "ALL", showPast: false },
+  filters: { q: "", year: "ALL", dist: "ALL", tier: "ALL", state: "ALL", avail: "ALL", showPast: false, showArchived: false },
   lastVisit: Number(localStorage.getItem("runhub_last_visit") || 0),
   syncing: false,
 };
@@ -459,7 +470,7 @@ function toast(msg) {
 /* ---------- data ---------- */
 async function load() {
   const [events, myRaces, status] = await Promise.all([
-    api("/api/events"),
+    api(`/api/events${state.filters.showArchived ? "?archived=1" : ""}`),
     api("/api/my-races"),
     api("/api/sync/status"),
   ]);
@@ -504,7 +515,7 @@ function renderSync(status) {
     text.textContent = secs < 90 ? `Synced ${secs}s ago` : `Synced ${Math.round(secs / 60)}m ago`;
     const counts = status.counts ? JSON.parse(status.counts) : null;
     const errors = status.errors ? JSON.parse(status.errors) : [];
-    $("#footerSync").textContent = counts
+    $("#footerSync").textContent = status.stats ? `${status.stats.active} active · ${status.stats.archived} archived` : counts
       ? `${counts.unique ?? 0} events · ${counts.categories ?? 0} categories · ${errors.length} portal warnings`
       : "—";
   }
@@ -519,12 +530,13 @@ function visible() {
   return state.events.filter((ev) => {
     const dists = distancesOf(ev);
 
-    if (!f.showPast) {
+    if (!f.showPast && !ev.archived_at) {
       const d = daysUntil(ev.start_date);
       if (d !== null && d < 0) return false;
     }
     if (f.year !== "ALL" && !(ev.start_date ?? "").startsWith(f.year)) return false;
     if (f.state !== "ALL" && ev.state !== f.state) return false;
+    if (f.avail !== "ALL" && (ev.status ?? "open") !== f.avail) return false;
     if (f.dist !== "ALL") {
       const want = Number(f.dist);
       const hit = dists.some((d) => (want === 42 ? d >= 40 : want === 21 ? d >= 20 && d < 40 : want === 10 ? d >= 9 && d < 20 : d >= 4 && d < 9));
@@ -566,7 +578,10 @@ function render() {
 
     const tags = [];
     if (isNew(ev)) tags.push('<span class="tag new">New</span>');
-    if (ev.status && /closed|sold/i.test(ev.status)) tags.push('<span class="tag closed">Closed</span>');
+    if (ev.archived_at) tags.push('<span class="tag closed">Archived</span>');
+    if (ev.status === "sold_out") tags.push('<span class="tag soldout">Sold out</span>');
+    else if (ev.status === "closed") tags.push('<span class="tag closed">Reg. closed</span>');
+    else if (ev.status === "cancelled") tags.push('<span class="tag closed">Cancelled</span>');
     for (const s of ev.sources ?? []) tags.push(`<span class="tag">${esc(s.portal)}</span>`);
 
     const countdown =
@@ -664,7 +679,7 @@ async function openDrawer(id) {
       <h5>Details</h5>
       <dl class="kv">
         <dt>Venue</dt><dd>${esc(ev.venue ?? "—")}</dd>
-        <dt>Status</dt><dd>${esc(ev.status ?? "—")}</dd>
+        <dt>Status</dt><dd>${esc({ open: "Open", sold_out: "Sold out", closed: "Registration closed", cancelled: "Cancelled" }[ev.status] ?? ev.status ?? "—")}</dd>
         <dt>First seen</dt><dd>${esc((ev.first_seen_at ?? "").slice(0, 10) || "—")}</dd>
       </dl>
     </div>
@@ -777,6 +792,7 @@ async function openSeason() {
 $("#q").addEventListener("input", (e) => { state.filters.q = e.target.value; render(); });
 $("#stateSel").addEventListener("change", (e) => { state.filters.state = e.target.value; render(); });
 $("#showPast").addEventListener("change", (e) => { state.filters.showPast = e.target.checked; render(); });
+$("#showArchived").addEventListener("change", (e) => { state.filters.showArchived = e.target.checked; load(); });
 
 $("#yearSeg").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-year]");
@@ -786,7 +802,7 @@ $("#yearSeg").addEventListener("click", (e) => {
   render();
 });
 
-for (const [sel, key] of [["#distChips", "dist"], ["#tierChips", "tier"]]) {
+for (const [sel, key] of [["#distChips", "dist"], ["#tierChips", "tier"], ["#availChips", "avail"]]) {
   $(sel).addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b) return;
@@ -797,13 +813,15 @@ for (const [sel, key] of [["#distChips", "dist"], ["#tierChips", "tier"]]) {
 }
 
 $("#resetBtn").addEventListener("click", () => {
-  state.filters = { q: "", year: "ALL", dist: "ALL", tier: "ALL", state: "ALL", showPast: false };
+  state.filters = { q: "", year: "ALL", dist: "ALL", tier: "ALL", state: "ALL", avail: "ALL", showPast: false, showArchived: false };
+  $("#showArchived").checked = false;
   $("#q").value = "";
   $("#stateSel").value = "ALL";
   $("#showPast").checked = false;
   [...$("#yearSeg").children].forEach((x) => x.classList.toggle("on", x.dataset.year === "ALL"));
   [...$("#distChips").children].forEach((x) => x.classList.toggle("on", x.dataset.dist === "ALL"));
   [...$("#tierChips").children].forEach((x) => x.classList.toggle("on", x.dataset.tier === "ALL"));
+  [...$("#availChips").children].forEach((x) => x.classList.toggle("on", x.dataset.avail === "ALL"));
   render();
 });
 

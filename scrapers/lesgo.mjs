@@ -79,7 +79,8 @@ export function mapEvent(row, terms = { state: {}, distance: {}, type: {} }) {
     description: [types.join(", "), info.portal ? `Registration via ${info.portal}` : null]
       .filter(Boolean)
       .join(" · ") || null,
-    status: info.cancelled ? "closed" : info.past ? "closed" : "open",
+    // Status is availability, not the calendar: a past event is archived by DATE, never by status.
+    status: info.cancelled ? "cancelled" : "open",
     banner_url: null,
     categories,
     entitlements: [],

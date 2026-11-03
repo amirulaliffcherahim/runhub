@@ -81,6 +81,18 @@
       "enabled": false,
       "baseUrl": "https://www.jomlari2u.com",
       "note": "Detail pages return HTTP 500 (event.categories.map). Re-enable when fixed."
+    },
+
+    "emas": {
+      "enabled": false,
+      "type": "ai",
+      "baseUrl": "https://emas.etranspay.com",
+      "listUrls": ["/emas/portal"],
+      "linkPattern": "href=\"([^\"]*/emas/portal/event/[^\"]+)\"",
+      "maxEvents": 12,
+      "maxChars": 2500,
+      "llmTimeoutMs": 120000,
+      "note": "AI crawler. Prose-only pages, no JSON-LD. Needs the BitNet server on this host (LLM_URL)."
     }
   }
 }

@@ -1,19 +1,21 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   openDb,
   getEvents,
   getEvent,
   getMyRaces,
   saveMyRace,
+  deleteMyRace,
   lastSyncRun,
+  dbStats,
 } from "./db.mjs";
 import { runSync } from "./sync.mjs";
-import { pathToFileURL } from "node:url";
 
 const PORT = Number(process.env.PORT ?? 3300);
-// Single-user local app: never expose the API beyond this machine.
+// Single-user app: never expose the API beyond this machine / Tailscale.
 const HOST = process.env.HOST ?? "127.0.0.1";
 const PUBLIC = resolve(new URL("./public/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
@@ -27,8 +29,8 @@ const MIME = {
   ".ico": "image/x-icon",
 };
 
-export function createApp({ dbPath } = {}) {
-  const db = openDb(dbPath);
+export async function createApp({ dbPath, db: existing } = {}) {
+  const db = existing ?? (await openDb({ connectionString: dbPath }));
   let syncing = null;
 
   const json = (res, code, body) => {
@@ -49,57 +51,67 @@ export function createApp({ dbPath } = {}) {
     }
   };
 
-  return createServer(async (req, res) => {    const url = new URL(req.url, `http://${req.headers.host}`);
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
     const path = url.pathname;
 
     try {
       // ---- API ----
       if (path === "/api/events" && req.method === "GET") {
-        return json(res, 200, getEvents(db, { state: url.searchParams.get("state") || undefined }));
+        const events = await getEvents(db, {
+          state: url.searchParams.get("state") || undefined,
+          includeArchived: url.searchParams.get("archived") === "1",
+        });
+        return json(res, 200, events);
       }
 
       if (path.startsWith("/api/events/") && req.method === "GET") {
-        const ev = getEvent(db, decodeURIComponent(path.slice("/api/events/".length)));
+        const ev = await getEvent(db, decodeURIComponent(path.slice("/api/events/".length)));
         return ev ? json(res, 200, ev) : json(res, 404, { error: "not found" });
       }
 
       if (path === "/api/my-races" && req.method === "GET") {
         // Join the event so the Season planner renders without a second round-trip.
-        const rows = getMyRaces(db).map((r) => {
-          const ev = getEvent(db, r.event_id);
-          return {
+        const rows = await getMyRaces(db);
+        const out = [];
+        for (const r of rows) {
+          const ev = await getEvent(db, r.event_id);
+          out.push({
             ...r,
             title: ev?.title ?? null,
             start_date: ev?.start_date ?? null,
             state: ev?.state ?? null,
+            archived: Boolean(ev?.archived_at),
             categories: ev?.categories ?? [],
             sources: ev?.sources ?? [],
-          };
-        });
-        return json(res, 200, rows);
+          });
+        }
+        return json(res, 200, out);
       }
 
       if (path === "/api/my-races" && req.method === "POST") {
         const body = await readBody(req);
         if (!body.event_id) return json(res, 400, { error: "event_id required" });
-        saveMyRace(db, body);
+        if (!(await getEvent(db, body.event_id))) return json(res, 400, { error: "unknown event_id" });
+        await saveMyRace(db, body);
         return json(res, 201, { ok: true });
       }
 
       if (path === "/api/my-races" && req.method === "DELETE") {
         const id = url.searchParams.get("event_id");
         if (!id) return json(res, 400, { error: "event_id required" });
-        db.prepare("DELETE FROM my_races WHERE event_id = ?").run(id);
+        await deleteMyRace(db, id);
         return json(res, 200, { ok: true });
       }
 
       if (path === "/api/sync/status" && req.method === "GET") {
-        return json(res, 200, { ...(lastSyncRun(db) ?? {}), running: Boolean(syncing) });
+        const [run, stats] = await Promise.all([lastSyncRun(db), dbStats(db)]);
+        return json(res, 200, { ...(run ?? {}), running: Boolean(syncing), stats });
       }
 
       if (path === "/api/sync/run" && req.method === "POST") {
         if (syncing) return json(res, 409, { error: "sync already running" });
-        syncing = runSync({ dbPath, log: () => {} })
+        syncing = runSync({ db, log: () => {} })
           .then((r) => ({ ok: true, ...r }))
           .catch((e) => ({ ok: false, error: e.message }))
           .finally(() => {
@@ -129,16 +141,18 @@ export function createApp({ dbPath } = {}) {
     } catch (e) {
       json(res, e.status ?? 500, { error: e.message });
     }
-  }).on("listening", function () {
-    // Expose the handle so tests/callers can close the SQLite file cleanly.
-    this.closeDb = () => db.close();
   });
+
+  server.closeDb = () => db.close();
+  return server;
 }
 
 const isMain = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
 
 if (isMain) {
-  createApp().listen(PORT, HOST, () => {
-    console.log(`RunHub on http://${HOST}:${PORT}`);
+  createApp().then((app) => {
+    app.listen(PORT, HOST, () => {
+      console.log(`RunHub on http://${HOST}:${PORT}`);
+    });
   });
 }
