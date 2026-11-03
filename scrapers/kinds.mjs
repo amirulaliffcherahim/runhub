@@ -27,6 +27,12 @@ const ALIASES = {
   drawstring_bag: "goodies",
   timing_chip: "timing",
   timing: "timing",
+  // Other RaceXasia Entitlement[].type values seen in the live catalogue.
+  lucky_draw: "prize_table",
+  ecert_design: "goodies",
+  wristband: "goodies",
+  bib_design: "goodies",
+  bib: "goodies",
   flag_off: "timing",
   cut_off: "timing",
   sizing_chart: "size_chart",
