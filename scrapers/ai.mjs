@@ -16,6 +16,7 @@ import { fetchJson, fetchWithRetry } from "./fetch.mjs";
 import { stripHtml, decodeEntities } from "./html.mjs";
 import { urlFor } from "./config.mjs";
 import { statusFromText } from "./status.mjs";
+import { canonicalState } from "./states.mjs";
 
 const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
 const pad = (n) => String(n).padStart(2, "0");
@@ -95,7 +96,8 @@ export function validateExtraction(raw, { pageUrl, pageText, portal = "ai" }) {
   if (!start) return { reject: "no valid date" };
 
   const distances = (Array.isArray(raw.distances) ? raw.distances : [])
-    .map((d) => Number.parseFloat(String(d).replace(/[^\d.]/g, "")))
+    // Keep the sign while parsing so "-3" is rejected instead of becoming 3.
+    .map((d) => Number.parseFloat(String(d).replace(/[^\d.-]/g, "")))
     .filter((d) => Number.isFinite(d) && d > 0 && d <= 200);
   const categories = [...new Set(distances)]
     .sort((a, b) => a - b)
@@ -110,6 +112,16 @@ export function validateExtraction(raw, { pageUrl, pageText, portal = "ai" }) {
       status: "open",
     }));
 
+  // The venue is copied verbatim from the page, so it is the stronger signal: a 2B model
+  // happily labels a Bukit Mertajam race "Selangor". Prefer the venue, then the model's
+  // state (only if the page actually mentions it), else leave null for resolveState.
+  const venue = clean(raw.venue, 160);
+  let state = canonicalState(venue);
+  if (!state) {
+    const claimed = clean(raw.state, 40);
+    if (claimed && haystack.includes(claimed.toLowerCase())) state = claimed;
+  }
+
   const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "event";
 
   return {
@@ -119,8 +131,8 @@ export function validateExtraction(raw, { pageUrl, pageText, portal = "ai" }) {
       organizer: null,
       start_date: start,
       end_date: start,
-      state: clean(raw.state, 40),
-      venue: clean(raw.venue, 160),
+      state,
+      venue,
       description: null,
       status: raw.sold_out === true ? "sold_out" : statusFromText(pageText) ?? "open",
       banner_url: null,
@@ -155,7 +167,7 @@ export async function askModel({ url, model, text, timeoutMs = 120000, fetchImpl
  * `cfg.listUrls` are pages that link to events; `cfg.linkPattern` (string regex) selects
  * the event links. `cfg.maxEvents` caps the work (the model is ~4s/page).
  */
-export async function scrapeAi(cfg, { ask = askModel } = {}) {
+export async function scrapeAi(cfg, { ask = askModel, fetchImpl = fetchWithRetry } = {}) {
   const errors = [];
   const events = [];
   const rejected = [];
@@ -170,7 +182,7 @@ export async function scrapeAi(cfg, { ask = askModel } = {}) {
   const linkRe = new RegExp(cfg.linkPattern ?? "href=\"([^\"]+)\"", "gi");
   const links = new Set();
   for (const listUrl of cfg.listUrls ?? []) {
-    const res = await fetchWithRetry(urlFor(cfg, listUrl), cfg.retries ?? 1, opts);
+    const res = await fetchImpl(urlFor(cfg, listUrl), cfg.retries ?? 1, opts);
     if (res.status !== 200) {
       errors.push(`ai list ${listUrl}: ${res.status}`);
       continue;
@@ -193,7 +205,7 @@ export async function scrapeAi(cfg, { ask = askModel } = {}) {
 
   // 2) read each page, ask the model, validate
   for (const url of targets) {
-    const page = await fetchWithRetry(url, cfg.retries ?? 1, opts);
+    const page = await fetchImpl(url, cfg.retries ?? 1, opts);
     if (page.status !== 200) {
       errors.push(`ai page ${url}: ${page.status}`);
       continue;

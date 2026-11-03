@@ -1,4 +1,4 @@
-﻿import { test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
@@ -344,3 +344,101 @@ test("ticket2u: sale-ended upcoming event is closed but still emitted", () => {
 
 // The end-to-end "sold-out events survive a sync" case lives in tests/sync.test.mjs,
 // which runs against Postgres (this file stays DB-free).
+
+// ---------- AI crawler: validation is the safety boundary ----------
+import { extractJson, normaliseDate, validateExtraction, scrapeAi } from "../scrapers/ai.mjs";
+
+const PAGE = "Penang Forest Run 2026 (POWERED BY DECATHLON) 14 Nov 2026 Bukit Mertajam Forest Park, Penang. 5KM 10KM 15KM. SOLD OUT";
+
+test("ai: extractJson copes with prose, fences and trailing text", () => {
+  assert.deepEqual(extractJson('{"a":1}'), { a: 1 });
+  assert.deepEqual(extractJson('Sure!\n```json\n{"a":2}\n```\n'), { a: 2 });
+  assert.deepEqual(extractJson('here you go {"a":3} hope that helps'), { a: 3 });
+  assert.equal(extractJson("no json at all"), null);
+  assert.equal(extractJson(null), null);
+});
+
+test("ai: normaliseDate only accepts real dates", () => {
+  assert.equal(normaliseDate("2026-11-14"), "2026-11-14");
+  assert.equal(normaliseDate("2027-02-31"), null, "impossible date");
+  assert.equal(normaliseDate("14 Nov 2026"), "2026-11-14");
+  assert.equal(normaliseDate("soon"), null);
+  assert.equal(normaliseDate(null), null);
+});
+
+test("ai: validateExtraction accepts a faithful extraction", () => {
+  const { event } = validateExtraction(
+    { name: "Penang Forest Run 2026", date: "2026-11-14", venue: "Bukit Mertajam Forest Park, Penang", state: "Penang", distances: [5, 10, 15], sold_out: true },
+    { pageUrl: "https://emas.example/event/penang", pageText: PAGE }
+  );
+  assert.equal(event.start_date, "2026-11-14");
+  assert.equal(event.state, "Penang");
+  assert.equal(event.status, "sold_out");
+  assert.deepEqual(event.categories.map((c) => c.distance_km), [5, 10, 15]);
+  assert.equal(event.origin, "ai");
+  assert.equal(event.sources[0].portal, "ai");
+});
+
+test("ai: a hallucinated name or a missing date is rejected", () => {
+  const base = { date: "2026-11-14", venue: "x", state: "Penang", distances: [5] };
+  assert.equal(validateExtraction({ ...base, name: "Totally Invented Ultra 2030" }, { pageUrl: "u", pageText: PAGE }).reject, "name not in page");
+  assert.equal(validateExtraction({ ...base, name: "Penang Forest Run 2026", date: null }, { pageUrl: "u", pageText: PAGE }).reject, "no valid date");
+  assert.equal(validateExtraction(null, { pageUrl: "u", pageText: PAGE }).reject, "no json");
+});
+
+test("ai: the venue wins over a wrong model state", () => {
+  // Regression: the model labelled a Bukit Mertajam race "Selangor".
+  const { event } = validateExtraction(
+    { name: "Penang Forest Run 2026", date: "2026-11-14", venue: "Bukit Mertajam Forest Park, Penang", state: "Selangor", distances: [5] },
+    { pageUrl: "u", pageText: PAGE }
+  );
+  assert.equal(event.state, "Penang", "derived from the venue, not the model");
+});
+
+test("ai: without a usable venue, a state the page never mentions is dropped", () => {
+  const { event } = validateExtraction(
+    { name: "Penang Forest Run 2026", date: "2026-11-14", venue: "Somewhere", state: "Sabah", distances: [5] },
+    { pageUrl: "u", pageText: PAGE }
+  );
+  assert.equal(event.state, null, "Sabah is not in the page text");
+});
+
+test("ai: distances are clamped to sane values and deduped", () => {
+  const { event } = validateExtraction(
+    { name: "Penang Forest Run 2026", date: "2026-11-14", distances: [5, "5km", 9999, -3, 0, 21.1] },
+    { pageUrl: "u", pageText: PAGE }
+  );
+  assert.deepEqual(event.categories.map((c) => c.distance_km), [5, 21.1]);
+});
+
+test("ai: scrapeAi only follows links on the configured host and reports model failures", async () => {
+  const pages = {
+    "https://emas.example/portal": '<a href="/event/a">A</a><a href="https://evil.example/event/b">B</a>',
+    "https://emas.example/event/a": "<h1>Alpha Trail Run 2026</h1> 1 May 2027 Selangor 10km",
+  };
+  const fetchImpl = async (url) => ({ status: pages[url] ? 200 : 404, text: pages[url] ?? "" });
+  const asked = [];
+  const res = await scrapeAi(
+    { name: "emas", baseUrl: "https://emas.example", listUrls: ["/portal"], linkPattern: 'href="([^"]+)"', maxEvents: 5 },
+    {
+      fetchImpl,
+      ask: async ({ text }) => {
+        asked.push(text);
+        return JSON.stringify({ name: "Alpha Trail Run 2026", date: "2027-05-01", state: "Selangor", distances: [10] });
+      },
+    }
+  );
+  assert.equal(asked.length, 1, "the off-host link must not be fetched");
+  assert.equal(res.events.length, 1);
+  assert.equal(res.events[0].start_date, "2027-05-01");
+});
+
+test("ai: a model that returns junk yields a rejection, not an event", async () => {
+  const fetchImpl = async (url) => ({ status: 200, text: url.endsWith("/portal") ? '<a href="/event/a">A</a>' : "Alpha Trail Run 2026 1 May 2027" });
+  const res = await scrapeAi(
+    { name: "emas", baseUrl: "https://emas.example", listUrls: ["/portal"], linkPattern: 'href="([^"]+)"' },
+    { fetchImpl, ask: async () => "I could not find any event, sorry." }
+  );
+  assert.equal(res.events.length, 0);
+  assert.equal(res.rejected.length, 1);
+});
