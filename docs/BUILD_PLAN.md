@@ -512,3 +512,85 @@ after : 456 scraped-unique -> 435 stored; 263 upcoming; 0 errors; ~60s
 - Coverage is only as complete as Lesgo's own submissions plus the public portals. Events that
   exist only on Facebook/Instagram or on CheckpointSpot and were never listed on Lesgo are still
   missing (see `work.md`).
+
+## 15. Postgres + archive lifecycle + AI crawler (2026-11-03)
+
+### Storage moved to Postgres
+
+`node:sqlite` is gone. The app now runs on Postgres (`pg`, the only runtime dependency),
+on itsmini: role+db `runhub` on the local server (port 5433), reachable over Tailscale.
+`DATABASE_URL` lives only in `.env` (0600, gitignored) and in the pm2 process env.
+
+- `openDb()` returns `{ query, pool, close }`; everything is async.
+- Schema is created on boot; new columns are added with `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`.
+- Tests use a throwaway **schema** per file (`tests/helpers.mjs`), so they exercise the real
+  engine against the real server without touching real data. They skip cleanly when no
+  `DATABASE_URL` is reachable.
+- Date columns stay `TEXT` in ISO form: it sorts correctly and matches what the scrapers,
+  API and UI already use. (Postgres will not compare `text` to `CURRENT_DATE` without a cast,
+  so date maths is done in JS.)
+
+### Archive instead of delete
+
+Nothing is ever deleted any more. `events.archived_at` + `archived_reason`:
+
+| reason | when |
+|---|---|
+| `date_passed` | `start_date` is older than `ARCHIVE_GRACE_DAYS` (default **7**) |
+| `delisted` | every portal that listed it succeeded this sync and none returned it |
+
+- Archived rows keep their categories, entitlements and sources.
+- `/api/events` hides them; `/api/events?archived=1` returns them; `/api/events/<id>` always
+  resolves. The UI has a "show archive" toggle and an "Archived" badge.
+- `archiveStale` never touches an event whose portal failed this run (cannot tell "gone" from
+  "unreachable"), and an event that reappears is un-archived by the next `saveEvent`.
+- `my_races` rows survive archiving (FK is `ON DELETE CASCADE`, but nothing deletes).
+
+### Sold-out / closed events are kept
+
+Status is normalised in `scrapers/status.mjs` to `open | sold_out | closed | cancelled`
+(English + Malay: "sold out", "fully subscribed", "habis dijual", "registration is closed").
+Sources of truth per portal:
+
+- **RaceXasia**: the list card's ticket icon (`status closed` / `title="Closed"`), because the
+  embedded dump always says `Available`.
+- **BiiB**: the list card badge "Registration is Closed" (the detail page had no signal and
+  was hard-coded to `open`).
+- **Ticket2U**: `status: expired` (date passed) or `issaleend = 1` (sales over, race ahead).
+- **Lesgo**: `EventCancelled` in JSON-LD -> `cancelled`.
+
+A sold-out or closed event is **never** hidden or archived because of its status: only the
+date archives an event. The UI has an Availability filter (Open / Sold out / Reg. closed).
+
+### AI crawler (second, independent reader)
+
+`scrapers/ai.mjs` reads pages the coded scrapers do not cover, using BitNet b1.58-2B-4T
+(`llama-server` on itsmini) as a **parser only**:
+
+- Output is validated before it can become an event: the title must appear in the page text,
+  the date must be a real ISO date, distances are clamped to 1-200 km, the state is derived
+  from the venue (a 2B model mislabels states), and links are restricted to the configured host.
+- Everything it produces carries `origin: "ai"`, so a coded sync that does not look at those
+  pages never archives them.
+- ~6 s/page on itsmini. Configured in `sources.json` like any other source (`type: "ai"`).
+
+Live result on `racingschedule.com/races/my`: 8/8 events validated (IRONMAN Malaysia,
+PBIM, Miri Marathon, IRONMAN 70.3 Desaru, Malaysia Ultra-Trail by UTMB...), 0 errors.
+EMAS (`emas.etranspay.com`) works too but currently lists finished races, so it is disabled.
+
+Known AI weaknesses: distances are sometimes incomplete (PBIM came back in miles) and one
+state was wrong (Kota Bharu labelled Perak). The coded scrapers win the merge, so this only
+shows up for events no portal lists.
+
+### Verified (live, itsmini, 2026-11-03)
+
+```
+sync: racexasia 16 | jomrun 49 | howei 114 | biib 144 | heyjom 48 | ticket2u 162
+      lesgo 245 | racingschedule 8 (AI)
+      786 scraped -> 461 unique, 555 categories, 832 entitlements,
+      151 archived (date), 0 archived (delisted), 0 errors
+DB:   461 events = 307 active + 154 archived; 297 open, 10 closed, 0 lost
+API:  /api/events -> 307; /api/events?archived=1 -> 461
+```
+
+**Tests: 103/103 passing** against real Postgres (`npm test`).

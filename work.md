@@ -1,7 +1,26 @@
 # RunHub MY — Future Work
 
-Phase 1 and 2 (T1–T9) are done. See `docs/BUILD_PLAN.md` §13 for the build log.
+Phases 1–3 are done: coded scrapers, coverage expansion, Postgres storage, archive lifecycle,
+sold-out handling, and a BitNet AI crawler. See `docs/BUILD_PLAN.md` §13–§15 for the build log.
 This file tracks what is left. Order = priority.
+
+## Done recently (context, do not redo)
+- Postgres storage (itsmini, role+db `runhub`), `DATABASE_URL` in `.env` only.
+- Archive instead of delete: `date_passed` after 7 days, `delisted` when a portal drops it.
+- Sold-out / closed events kept and filterable in the UI.
+- AI crawler (`scrapers/ai.mjs`) on BitNet, validated output, `origin: "ai"`; live on racingschedule.com.
+
+## AI crawler follow-ups
+- Feed it more directories (`ahotu.com`, `myfitx.my`, `jomlari2u.com`) once their detail pages behave.
+- Batch prompts (several events per call) to cut the ~6s/page cost.
+- Guard distances given in miles: PBIM came back as 26.2 instead of 42.2 km.
+- One state still came out wrong (Kota Bharu labelled Perak); widen the venue-first rule.
+- Log rejected extractions to a table so precision can be measured over time.
+
+## Archive follow-ups
+- Dedicated archive page (currently a toggle on the main grid).
+- `my_races` rows whose event is archived should render as "past" in the Season planner.
+- Optional retention: drop archived rows older than N years (currently kept forever, by design).
 
 ## Next
 
