@@ -12,6 +12,8 @@ import {
   lastSyncRun,
   recentSyncRuns,
   dbStats,
+  getProfile,
+  saveProfile,
 } from "./db.mjs";
 import { runSync } from "./sync.mjs";
 import { annotateClashes } from "./clashes.mjs";
@@ -120,6 +122,29 @@ export async function createApp({ dbPath, db: existing } = {}) {
         if (!id) return json(res, 400, { error: "event_id required" });
         await deleteMyRace(db, id);
         return json(res, 200, { ok: true });
+      }
+
+      if (path === "/api/profile" && req.method === "GET") {
+        return json(res, 200, await getProfile(db));
+      }
+
+      if (path === "/api/profile" && req.method === "PUT") {
+        const body = await readBody(req);
+        const shirt = body.shirt_size == null ? null : String(body.shirt_size).trim().slice(0, 8) || null;
+        const chest = body.chest_cm == null ? null : Number.parseInt(body.chest_cm, 10);
+        if (chest != null && (!Number.isFinite(chest) || chest < 40 || chest > 200)) {
+          return json(res, 400, { error: "chest_cm must be between 40 and 200" });
+        }
+        // Paces: { "21": "5:30" } minutes per km. Reject anything that is not m:ss.
+        const paces = {};
+        for (const [km, pace] of Object.entries(body.paces ?? {})) {
+          if (!/^\d{1,3}(\.\d+)?$/.test(String(km))) return json(res, 400, { error: `bad distance key: ${km}` });
+          if (pace == null || pace === "") continue;
+          if (!/^\d{1,2}:\d{2}$/.test(String(pace))) return json(res, 400, { error: `bad pace for ${km}km: ${pace}` });
+          paces[String(km)] = String(pace);
+        }
+        await saveProfile(db, { shirt_size: shirt, chest_cm: chest, paces });
+        return json(res, 200, await getProfile(db));
       }
 
       if (path === "/api/sync/status" && req.method === "GET") {

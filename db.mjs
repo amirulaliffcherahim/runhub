@@ -104,6 +104,16 @@ CREATE TABLE IF NOT EXISTS my_races (
   notes           TEXT
 );
 
+-- Single-user profile: shirt size and target paces, used to annotate the drawer.
+CREATE TABLE IF NOT EXISTS profile (
+  id         INTEGER PRIMARY KEY DEFAULT 1,
+  shirt_size TEXT,
+  chest_cm   INTEGER,
+  paces      TEXT,   -- JSON: {"5":"5:00","10":"5:15","21":"5:30","42":"6:00"} minutes per km
+  updated_at TEXT,
+  CONSTRAINT profile_single_row CHECK (id = 1)
+);
+
 CREATE TABLE IF NOT EXISTS sync_runs (
   id          SERIAL PRIMARY KEY,
   started_at  TEXT,
@@ -490,6 +500,30 @@ export async function saveMyRace(db, r) {
 }
 
 export const getMyRaces = async (db) => (await db.query("SELECT * FROM my_races")).rows;
+
+/** The single profile row, or empty values when it has never been saved. */
+export async function getProfile(db) {
+  const row = (await db.query("SELECT shirt_size, chest_cm, paces FROM profile WHERE id = 1")).rows[0];
+  let paces = {};
+  try {
+    const parsed = row?.paces ? JSON.parse(row.paces) : null;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) paces = parsed;
+  } catch {
+    paces = {};
+  }
+  return { shirt_size: row?.shirt_size ?? null, chest_cm: row?.chest_cm ?? null, paces };
+}
+
+export async function saveProfile(db, { shirt_size = null, chest_cm = null, paces = {} }) {
+  await db.query(
+    `INSERT INTO profile (id, shirt_size, chest_cm, paces, updated_at)
+     VALUES (1,$1,$2,$3,$4)
+     ON CONFLICT (id) DO UPDATE SET
+       shirt_size=EXCLUDED.shirt_size, chest_cm=EXCLUDED.chest_cm,
+       paces=EXCLUDED.paces, updated_at=EXCLUDED.updated_at`,
+    [shirt_size, chest_cm, JSON.stringify(paces ?? {}), now()]
+  );
+}
 
 export const deleteMyRace = async (db, eventId) => {
   await db.query("DELETE FROM my_races WHERE event_id = $1", [eventId]);

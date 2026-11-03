@@ -340,3 +340,22 @@ test("a clashing race shows a warning badge on its card (Z8)", { skip }, async (
   assert.match(badge[0], /Clashes with Saved Spring HM 2099/);
   await page.close();
 });
+
+test("drawer shows your projected finish against the cut-off (Z7)", { skip }, async () => {
+  await fetch(`${base}/api/profile`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ shirt_size: "M", chest_cm: 96, paces: { "21": "6:00" } }),
+  });
+
+  const page = await browser.newPage();
+  await page.goto(base, { waitUntil: "networkidle" });
+  await page.click('.card[data-id="matrix-2026"]');
+  await page.waitForSelector("#drawer .sect");
+  const text = await page.locator("#drawer").textContent();
+
+  // 21.1km at 6:00/km = 2:07 -> inside the 4 hour cut-off.
+  assert.match(text, /~2:07/, "projected finish for the half");
+  assert.match(text, /Your saved size/, "profile size shown next to the kit");
+  assert.match(text, /M/, "the saved size value");
+  await page.close();
+});

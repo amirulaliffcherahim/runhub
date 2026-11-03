@@ -219,3 +219,37 @@ test("GET /api/events attaches clash warnings for unsaved events (Z8)", { skip }
   // api-race-2026 is 2099-08-01, api-penang-2026 is 2099-09-01 -> far apart, no clash.
   assert.deepEqual(other.clashes, []);
 });
+
+test("GET/PUT /api/profile stores shirt size and paces, and validates them (Z7)", { skip }, async () => {
+  const empty = await (await get("/api/profile")).json();
+  assert.deepEqual(empty, { shirt_size: null, chest_cm: null, paces: {} });
+
+  const put = await fetch(`${base}/api/profile`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ shirt_size: "M", chest_cm: 96, paces: { "21": "5:30", "42": "6:00" } }),
+  });
+  assert.equal(put.status, 200);
+  const saved = await put.json();
+  assert.equal(saved.shirt_size, "M");
+  assert.equal(saved.chest_cm, 96);
+  assert.deepEqual(saved.paces, { "21": "5:30", "42": "6:00" });
+
+  const badPace = await fetch(`${base}/api/profile`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paces: { "21": "fast" } }),
+  });
+  assert.equal(badPace.status, 400);
+
+  const badChest = await fetch(`${base}/api/profile`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chest_cm: 500 }),
+  });
+  assert.equal(badChest.status, 400);
+
+  const badKey = await fetch(`${base}/api/profile`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paces: { "twenty": "5:30" } }),
+  });
+  assert.equal(badKey.status, 400);
+});

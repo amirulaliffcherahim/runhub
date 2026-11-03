@@ -423,6 +423,30 @@
       <button class="btn" id="closeSeason">✕</button>
     </header>
     <div class="list" id="seasonList"></div>
+    <div class="sect" style="padding:0 18px 14px">
+      <h5 style="margin:0 0 8px;font-size:10.5px;text-transform:uppercase;letter-spacing:0.8px;color:var(--muted)">Your profile</h5>
+      <div class="inputs">
+        <label>Shirt size
+          <input id="pfShirt" value="${esc(state.profile?.shirt_size ?? "")}" placeholder="M" size="5" />
+        </label>
+        <label>Chest (cm)
+          <input id="pfChest" value="${esc(state.profile?.chest_cm ?? "")}" placeholder="96" size="5" />
+        </label>
+        <label>Pace 5K
+          <input id="pfP5" value="${esc(state.profile?.paces?.["5"] ?? "")}" placeholder="5:00" size="6" />
+        </label>
+        <label>Pace 10K
+          <input id="pfP10" value="${esc(state.profile?.paces?.["10"] ?? "")}" placeholder="5:15" size="6" />
+        </label>
+        <label>Pace 21K
+          <input id="pfP21" value="${esc(state.profile?.paces?.["21"] ?? "")}" placeholder="5:30" size="6" />
+        </label>
+        <label>Pace 42K
+          <input id="pfP42" value="${esc(state.profile?.paces?.["42"] ?? "")}" placeholder="6:00" size="6" />
+        </label>
+        <button class="btn primary" id="pfSave">Save profile</button>
+      </div>
+    </div>
     <footer>
       <span class="hint">Pace is derived from your goal time and distance.</span>
       <div style="display:flex;gap:8px">
@@ -458,6 +482,7 @@ const GLOBAL_KIT = /\b(asics|adidas|nike|puma|new balance|under armour|hoka|sauc
 const state = {
   events: [],
   myRaces: [],
+  profile: { shirt_size: null, chest_cm: null, paces: {} },
   filters: { q: "", year: "ALL", dist: "ALL", tier: "ALL", state: "ALL", avail: "ALL", showPast: false, showArchived: false },
   lastVisit: Number(localStorage.getItem("runhub_last_visit") || 0),
   syncing: false,
@@ -549,6 +574,7 @@ async function load() {
   ]);
   state.events = events;
   state.myRaces = myRaces;
+  state.profile = await api("/api/profile").catch(() => ({ shirt_size: null, chest_cm: null, paces: {} }));
   renderPortals();
   renderStates();
   renderSync(status);
@@ -750,6 +776,32 @@ const cutoffMinutes = (v) => {
   return null;
 };
 
+/** Your saved pace for the closest distance, in minutes per km. */
+function myPaceFor(km) {
+  const paces = state.profile?.paces ?? {};
+  const keys = Object.keys(paces).map(Number).filter((n) => Number.isFinite(n));
+  if (!keys.length || km == null) return null;
+  const best = keys.sort((a, b) => Math.abs(a - km) - Math.abs(b - km))[0];
+  const [m, s] = String(paces[best]).split(":").map(Number);
+  if (!Number.isFinite(m) || !Number.isFinite(s)) return null;
+  return { km: best, minutes: m + s / 60 };
+}
+
+/** Projected finish time for a category, and whether it beats the cut-off. */
+function projectedFinish(c) {
+  const km = Number(c.distance_km);
+  const pace = myPaceFor(km);
+  if (!pace || !km) return null;
+  const total = pace.minutes * km;
+  const h = Math.floor(total / 60);
+  const m = Math.round(total % 60);
+  const cutoff = cutoffMinutes(c.cutoff_time);
+  return {
+    text: `${h}:${String(m).padStart(2, "0")}`,
+    beatsCutoff: cutoff == null ? null : total <= cutoff,
+  };
+}
+
 /** Pace you must hold to beat the cut-off: distance / cut-off time. */
 function requiredPace(c) {
   const mins = cutoffMinutes(c.cutoff_time);
@@ -778,7 +830,7 @@ async function openDrawer(id) {
   const notes = ents.filter((e) => !e.image_url && e.title);
 
   const rows = cats.length
-    ? `<table><thead><tr><th>Category</th><th>Dist</th><th>Early</th><th>Normal</th><th>Flag-off</th><th>Cut-off</th><th>Needed pace</th></tr></thead><tbody>
+    ? `<table><thead><tr><th>Category</th><th>Dist</th><th>Early</th><th>Normal</th><th>Flag-off</th><th>Cut-off</th><th>Needed pace</th><th>Your finish</th></tr></thead><tbody>
         ${cats.map((c) => `<tr>
           <td>${esc(c.label ?? "—")}
             ${c.min_age != null ? `<div class="dim" style="font-size:10.5px">${c.min_age}+ yrs</div>` : ""}
@@ -790,6 +842,12 @@ async function openDrawer(id) {
           <td class="dim">${esc(c.flag_off_time ?? "—")}</td>
           <td class="dim">${esc(c.cutoff_time ?? "—")}</td>
           <td class="dim">${requiredPace(c) ?? "—"}</td>
+          <td class="dim">${(() => {
+            const pf = projectedFinish(c);
+            if (!pf) return "—";
+            const colour = pf.beatsCutoff === false ? "color:#fb7185" : pf.beatsCutoff ? "color:#7dd3a0" : "";
+            return `<span style="${colour}" title="your saved pace">~${pf.text}</span>`;
+          })()}</td>
         </tr>`).join("")}
       </tbody></table>`
     : `<p class="hint">No category or price table published on this portal.</p>`;
@@ -854,7 +912,7 @@ async function openDrawer(id) {
       ${rows}
     </div>
 
-    ${kit ? `<div class="sect"><h5>Kit, size chart &amp; route</h5>${kit}</div>` : ""}
+    ${kit ? `<div class="sect"><h5>Kit, size chart &amp; route</h5>${state.profile?.shirt_size ? `<p class="hint" style="margin:0 0 8px">Your saved size: <b style="color:var(--lime)">${esc(state.profile.shirt_size)}</b>${state.profile.chest_cm ? ` (${state.profile.chest_cm} cm chest)` : ""}</p>` : ""}${kit}</div>` : ""}
 
     ${notes.length ? `<div class="sect"><h5>Also included</h5><ul class="prose">${notes.map((e) => `<li>${esc(e.title)}</li>`).join("")}</ul></div>` : ""}
 
@@ -1073,6 +1131,26 @@ document.addEventListener("keydown", (e) => {
 });
 
 $("#seasonBtn").addEventListener("click", openSeason);
+
+$("#seasonModal").addEventListener("click", async (e) => {
+  if (e.target.id !== "pfSave") return;
+  const val = (id) => $(id).value.trim();
+  const paces = {};
+  for (const [km, id] of [["5", "#pfP5"], ["10", "#pfP10"], ["21", "#pfP21"], ["42", "#pfP42"]]) {
+    if (val(id)) paces[km] = val(id);
+  }
+  try {
+    state.profile = await api("/api/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shirt_size: val("#pfShirt") || null, chest_cm: val("#pfChest") || null, paces }),
+    });
+    toast("Profile saved");
+    openSeason();
+  } catch (err) {
+    toast(`Profile not saved: ${err.message}`);
+  }
+});
 $("#closeSeason").addEventListener("click", () => $("#seasonModal").classList.remove("open"));
 $("#seasonModal").addEventListener("click", (e) => { if (e.target.id === "seasonModal") $("#seasonModal").classList.remove("open"); });
 
