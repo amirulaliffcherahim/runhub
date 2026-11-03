@@ -594,3 +594,40 @@ API:  /api/events -> 307; /api/events?archived=1 -> 461
 ```
 
 **Tests: 103/103 passing** against real Postgres (`npm test`).
+
+## 16. Silent runs + backend status (2026-11-03)
+
+A daily sweep now takes ~18 minutes (Howei alone is 114 pages at its declared 5s
+crawl-delay), so the run must not be something you sit and watch. It is silent, and its
+state lives in Postgres.
+
+### Tables
+
+- `sync_runs.status` - running | ok | partial | failed | interrupted.
+  The row is opened BEFORE the first portal and closed on success or crash, so an
+  in-flight run is visible. A row still "running" after STALE_MINUTES (90) is reported
+  as "interrupted" - that is how a killed process shows up.
+- `sync_portal_runs` (run_id, portal) - started/finished, events, errors, status per portal.
+  A portal that throws records "failed"; one that returns partial results records "partial".
+
+### Running it
+
+    node sync.mjs            # interactive: prints per-portal progress
+    node sync.mjs --quiet    # cron / Task Scheduler: no console output, DB only
+
+run-sync.cmd and the itsmini cron both use --quiet. logs/sync.log is kept only for
+crashes that never reach the DB.
+
+### Checking on it
+
+    curl -s localhost:3300/api/sync/status   # latest run + portal_runs + DB stats
+    curl -s localhost:3300/api/sync/runs?limit=5
+
+The UI pill reads the same endpoint: it shows "Synced 3m ago" / "Synced (warnings)" /
+"Sync failed" / "Sync interrupted", and the tooltip names the failed portals.
+
+### Verified (itsmini)
+
+    run 5  status ok  portals ["heyjom"]  portal_runs ["heyjom:ok(49)"]
+    sync: 800 scraped -> 466 unique, 555 categories, 1266 entitlements,
+          151 archived (date), 0 errors, 641 requests across 9 hosts in 1065s

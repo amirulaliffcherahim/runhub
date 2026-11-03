@@ -21,7 +21,8 @@ the official ticket URL(s).
 ## Run it
 
 ```bash
-npm run sync     # fetch every portal, dedupe, persist (~3 min)
+npm run sync     # fetch every portal, dedupe, persist (~18 min, polite rate limits)
+npm run sync -- --quiet   # same, silent: status goes to Postgres, not the console
 npm start        # http://127.0.0.1:3300
 npm test         # 103 tests, real Postgres + real server
 npm run verify   # fixture + live-DB sanity check
