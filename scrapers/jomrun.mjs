@@ -1,6 +1,6 @@
 import { fetchWithRetry } from "./fetch.mjs";
 import { toIso } from "./dates.mjs";
-import { stripHtml } from "./html.mjs";
+import { stripHtml, decodeEntities } from "./html.mjs";
 import { pmap, settle } from "./pool.mjs";
 import { urlFor } from "./config.mjs";
 
@@ -31,8 +31,49 @@ export function parseDetail(html, slug, base = BASE) {
   const about = html.match(/<h3>\s*ABOUT\s*<\/h3>\s*<pre>([\s\S]*?)<\/pre>/);
   const entitlementText = about ? stripHtml(about[1]) : "";
 
+  /**
+   * The ABOUT <pre> is grouped per distance:
+   *   5KM Fun Run
+   *   1. Ultron(R) Event Jersey
+   *   2. Finisher Medal
+   *   10KM Competitive Run
+   *   ...
+   * Keep the newlines so each distance's list stays separate.
+   */
+  const aboutRaw = about ? decodeEntities(about[1].replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "")) : "";
+  const perDistance = [];
+  {
+    let current = null;
+    for (const line of aboutRaw.split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t) continue;
+      const heading = t.match(/^(\d+(?:\.\d+)?)\s*KM\b(.*)$/i);
+      if (heading) {
+        current = { km: Number.parseFloat(heading[1]), label: t, items: [] };
+        perDistance.push(current);
+        continue;
+      }
+      if (current && /^\d+\./.test(t)) current.items.push(t.replace(/^\d+\.\s*/, "").trim());
+    }
+  }
+  /** Does this distance's list include a finisher tee? ("Finisher Medal" is not a tee.) */
+  const finisherTeeFor = (km) => {
+    const hit = perDistance.find((d) => Math.abs(d.km - km) <= 0.25);
+    if (!hit) return null;
+    return hit.items.some((i) => /finisher\s+(tee|jersey|shirt|singlet)/i.test(i));
+  };
+
   const rpc = html.match(/<h3>\s*RACE PACK COLLECTION\s*<\/h3>\s*<pre>([\s\S]*?)<\/pre>/);
   const regEnd = html.match(/<h3>\s*REGISTRATION ENDS AT\s*<\/h3>\s*<pre>([\s\S]*?)<\/pre>/);
+
+  /** "Date: To Be Confirmed" -> null, "Venue: Mid Valley" -> "Mid Valley". Never invents. */
+  const rpcField = (label) => {
+    if (!rpc) return null;
+    const m = rpc[1].match(new RegExp(`${label}\\s*:\\s*([^<\\n]+)`, "i"));
+    const v = m ? stripHtml(m[1]).trim() : null;
+    return !v || /to be (confirmed|announced)|tbc|tba/i.test(v) ? null : v;
+  };
+  const registrationDeadline = regEnd ? toIso(stripHtml(regEnd[1])) : null;
 
   const cover = html.match(new RegExp(`<img src="(${S3}/cover_images/[^"]+)"`));
   const fee = html.match(new RegExp(`<img src="(${S3}/fee/[^"]+)"`));
@@ -107,10 +148,14 @@ export function parseDetail(html, slug, base = BASE) {
       cutoff_time: null,
       flag_off_time: time || null,
       status: "open",
+      // Whether this distance's entitlement list includes a finisher tee.
+      finisher_tee: finisherTeeFor(km),
     })),
     entitlements,
-    race_pack: rpc ? [{ date: null, time: null, venue: stripHtml(rpc[1]) }] : [],
-    registration_deadline: regEnd ? stripHtml(regEnd[1]) : null,
+    race_pack: rpc
+      ? [{ date: rpcField("Date"), time: rpcField("Time"), venue: rpcField("Venue") }]
+      : [],
+    registration_deadline: registrationDeadline,
     sources: [{ portal: "jomrun", source_url: `${base}/event/${slug}` }],
   };
 }

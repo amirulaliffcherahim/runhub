@@ -721,3 +721,29 @@ test("mergeCategories merges two generic tiers at the same distance", () => {
   assert.equal(out[0].price_normal, 80);
   assert.equal(out[0].flag_off_time, "6:00am");
 });
+
+// ---------- Z3: per-distance finisher tee parsing (JomRun ABOUT text) ----------
+test("jomrun ABOUT: finisher tee is attributed to the right distance", async () => {
+  const { parseDetail } = await import("../scrapers/jomrun.mjs");
+  const html = `
+    <h3>ABOUT</h3>
+    <pre>
+5KM Fun Run
+1. Event Jersey
+2. Finisher Medal
+
+21KM Competitive Run
+1. Event Jersey
+2. Finisher Tee
+3. Finisher Medal
+</pre>
+    <h3>RACE PACK COLLECTION</h3>
+    <pre>Date: 12 Dec 2026
+Time: 10:00am - 6:00pm
+Venue: Mid Valley Exhibition Centre</pre>`;
+  const e = parseDetail(html, "x");
+  const byKm = Object.fromEntries(e.categories.map((c) => [c.distance_km, c]));
+  assert.equal(byKm[5].finisher_tee, false, "5KM gets no finisher tee");
+  assert.equal(byKm[21].finisher_tee, true, "21KM does");
+  assert.deepEqual(e.race_pack[0], { date: "12 Dec 2026", time: "10:00am - 6:00pm", venue: "Mid Valley Exhibition Centre" });
+});

@@ -193,3 +193,25 @@ test("biib: registration close date and size-chart images", () => {
   assert.ok(e.entitlements.every((x) => x.kind === "size_chart"));
   assert.ok(e.entitlements.every((x) => x.image_url.startsWith("https://")));
 });
+
+// ---------- Z3: JomRun logistics ----------
+test("jomrun: registration deadline is parsed to ISO", () => {
+  const e = jrDetail(fx("jomrun-detail.html"), "iib20-medini-run-2026");
+  assert.equal(e.registration_deadline, "2026-11-28", "from 'REGISTRATION ENDS AT'");
+});
+
+test("jomrun: 'To Be Confirmed' race-pack fields stay null, never invented", () => {
+  const e = jrDetail(fx("jomrun-detail.html"), "iib20-medini-run-2026");
+  assert.equal(e.race_pack.length, 1);
+  assert.equal(e.race_pack[0].date, null);
+  assert.equal(e.race_pack[0].time, null);
+  assert.equal(e.race_pack[0].venue, null);
+});
+
+test("jomrun: finisher tee is decided per distance from the ABOUT list", () => {
+  const e = jrDetail(fx("jomrun-detail.html"), "iib20-medini-run-2026");
+  const byKm = Object.fromEntries(e.categories.map((c) => [c.distance_km, c]));
+  // This race gives an event jersey + finisher medal, no finisher tee.
+  assert.equal(byKm[5].finisher_tee, false);
+  assert.equal(byKm[10].finisher_tee, false);
+});
