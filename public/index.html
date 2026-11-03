@@ -218,6 +218,25 @@
   td.money { font-family: var(--mono); color: #7dd3a0; }
   td.dim { color: var(--muted); }
   .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .kitgroup { margin-bottom: 12px; }
+  .kitgroup h6 { margin: 0 0 6px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--lime); font-weight: 800; }
+  .maplink { font-size: 10.5px; color: var(--lime); border: 1px solid rgba(200,255,0,0.35); padding: 1px 6px; border-radius: 5px; margin-left: 4px; }
+  .checkoutbar {
+    position: sticky; bottom: 0; display: flex; gap: 8px; flex-wrap: wrap;
+    padding: 12px 18px; background: #131922; border-top: 1px solid var(--border);
+  }
+  .checkout {
+    flex: 1 1 160px; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    background: var(--lime); color: #000; font-weight: 800; font-size: 12.5px;
+    padding: 10px 12px; border-radius: 9px;
+  }
+  .checkout:hover { filter: brightness(1.08); }
+  /* lightbox */
+  .lightbox { position: fixed; inset: 0; z-index: 95; background: rgba(0,0,0,0.92); display: none; place-items: center; padding: 24px; }
+  .lightbox.open { display: grid; }
+  .lightbox img { max-width: 100%; max-height: 82vh; object-fit: contain; border-radius: 8px; }
+  .lightbox figcaption { color: var(--muted); font-size: 12px; text-align: center; margin-top: 10px; }
+  .lightbox .close { position: absolute; top: 14px; right: 18px; font-size: 22px; color: #fff; }
   .shot { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg); }
   .shot a { display: block; }
   .shot img { width: 100%; height: 130px; object-fit: contain; background: #0b0e12; display: block; }
@@ -411,6 +430,14 @@
       </div>
     </footer>
   </div>
+</div>
+
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true">
+  <button class="close" id="lightboxClose" aria-label="Close image">✕</button>
+  <figure style="margin:0">
+    <img id="lightboxImg" alt="" />
+    <figcaption id="lightboxCap"></figcaption>
+  </figure>
 </div>
 
 <div id="toast" role="status" aria-live="polite"></div>
@@ -705,6 +732,37 @@ function renderSeasonBadge() {
   $("#seasonBadge").textContent = state.myRaces.length;
 }
 
+/** "4 hours" / "4:30" / 240 -> minutes. Returns null when it is not a duration. */
+const cutoffMinutes = (v) => {
+  if (v == null) return null;
+  const s = String(v).toLowerCase();
+  const h = s.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/);
+  if (h) return Math.round(Number(h[1]) * 60);
+  const hm = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (hm) return Number(hm[1]) * 60 + Number(hm[2]);
+  const m = s.match(/(\d+)\s*(?:mins?|minutes?)\b/);
+  if (m) return Number(m[1]);
+  return null;
+};
+
+/** Pace you must hold to beat the cut-off: distance / cut-off time. */
+function requiredPace(c) {
+  const mins = cutoffMinutes(c.cutoff_time);
+  const km = Number(c.distance_km);
+  if (!mins || !km) return null;
+  const per = mins / km;
+  const m = Math.floor(per);
+  const s = Math.round((per - m) * 60);
+  return `${m}:${String(s).padStart(2, "0")}/km`;
+}
+
+/** Google Maps + Waze deep links for a free-text place. */
+const mapLinks = (query) => {
+  if (!query) return "";
+  const q = encodeURIComponent(query);
+  return `<a class="maplink" href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener noreferrer">Maps</a> <a class="maplink" href="https://waze.com/ul?q=${q}" target="_blank" rel="noopener noreferrer">Waze</a>`;
+};
+
 /* ---------- drawer ---------- */
 async function openDrawer(id) {
   const ev = await api(`/api/events/${encodeURIComponent(id)}`);
@@ -715,19 +773,63 @@ async function openDrawer(id) {
   const notes = ents.filter((e) => !e.image_url && e.title);
 
   const rows = cats.length
-    ? `<table><thead><tr><th>Category</th><th>Dist</th><th>Early</th><th>Normal</th><th>Flag-off</th></tr></thead><tbody>
+    ? `<table><thead><tr><th>Category</th><th>Dist</th><th>Early</th><th>Normal</th><th>Flag-off</th><th>Cut-off</th><th>Needed pace</th></tr></thead><tbody>
         ${cats.map((c) => `<tr>
-          <td>${esc(c.label ?? "—")}${c.price_note ? `<div class="dim" style="font-size:10.5px">${esc(c.price_note)}</div>` : ""}</td>
+          <td>${esc(c.label ?? "—")}
+            ${c.min_age != null ? `<div class="dim" style="font-size:10.5px">${c.min_age}+ yrs</div>` : ""}
+            ${c.finisher_tee === true ? `<div class="dim" style="font-size:10.5px;color:#7dd3a0">finisher tee</div>` : ""}
+            ${c.price_note ? `<div class="dim" style="font-size:10.5px">${esc(c.price_note)}</div>` : ""}</td>
           <td class="dim">${c.distance_km != null ? `${c.distance_km}km` : "—"}</td>
           <td class="money">${money(c.price_early) ?? "—"}</td>
           <td class="money">${money(c.price_normal) ?? "—"}</td>
           <td class="dim">${esc(c.flag_off_time ?? "—")}</td>
+          <td class="dim">${esc(c.cutoff_time ?? "—")}</td>
+          <td class="dim">${requiredPace(c) ?? "—"}</td>
         </tr>`).join("")}
       </tbody></table>`
     : `<p class="hint">No category or price table published on this portal.</p>`;
 
-  const pack = (ev.race_pack ?? []).map((p) => `<li>${esc([p.date, p.time, p.venue].filter(Boolean).join(" · "))}</li>`).join("");
+  // Kit grouped by kind, so the drawer reads like a checklist.
+  const KIT_LABEL = {
+    event_tee: "Event tee", finisher_tee: "Finisher tee", medal: "Medal",
+    size_chart: "Size chart", route_map: "Route map", goodies: "Goodies",
+    fee_table: "Fee table", prize_table: "Prizes", timing: "Timing", other: "More",
+  };
+  const kitGroups = [];
+  for (const e of shots) {
+    const kind = e.kind ?? "other";
+    const g = kitGroups.find((x) => x.kind === kind);
+    if (g) g.items.push(e);
+    else kitGroups.push({ kind, items: [e] });
+  }
+  const kit = kitGroups
+    .map((g) => `<div class="kitgroup"><h6>${esc(KIT_LABEL[g.kind] ?? g.kind)}</h6><div class="shots">${g.items
+      .map((e) => `<figure class="shot"><a href="${esc(e.image_url)}" data-zoom="${esc(e.image_url)}" data-caption="${esc(e.title ?? KIT_LABEL[g.kind] ?? "")}"><img src="${esc(e.image_url)}" alt="${esc(e.title ?? g.kind)}" loading="lazy" /></a><figcaption>${esc(e.title ?? KIT_LABEL[g.kind] ?? "")}</figcaption></figure>`)
+      .join("")}</div></div>`)
+    .join("");
+
+  // Race pack collection: dates, window, venue, and a map link for each point.
+  const pack = (ev.race_pack ?? [])
+    .map((p) => {
+      const bits = [p.date, p.time].filter(Boolean).join(" · ");
+      const q = [p.venue, ev.state].filter(Boolean).join(", ");
+      return `<li>${esc(bits || "date TBC")}${p.venue ? ` — ${esc(p.venue)}` : ""}${q ? ` ${mapLinks(q)}` : ""}</li>`;
+    })
+    .join("");
   const keyDates = (ev.key_dates ?? []).map((k) => `<li>${esc(k.date ?? "")} — ${esc(k.title ?? "")}</li>`).join("");
+
+  // Checkout bar: one button per portal that actually sells tickets.
+  const cheapest = Math.min(...cats.map((c) => c.price_normal ?? c.price_early).filter((p) => p != null));
+  const priceTag = Number.isFinite(cheapest) ? ` — ${money(cheapest)}` : "";
+  const LISTING_ONLY = new Set(["lesgo", "ai"]);
+  const checkout = (ev.sources ?? [])
+    .filter((s) => s.portal !== "official" || (ev.sources ?? []).length === 1)
+    .map((s) => {
+      const listing = LISTING_ONLY.has(s.portal);
+      return `<a class="checkout" href="${esc(s.source_url)}" target="_blank" rel="noopener noreferrer">
+        <span>${listing ? "Listing" : "Checkout"} on ${esc(s.portal)}${listing ? "" : priceTag}</span><span>↗</span></a>`;
+    })
+    .join("");
 
   $("#drawer").innerHTML = `
     <header>
@@ -743,25 +845,20 @@ async function openDrawer(id) {
     </header>
 
     <div class="sect">
-      <h5>Buy / official links</h5>
-      <div class="buylist">
-        ${(ev.sources ?? []).map((s) => `<a class="buy" href="${esc(s.source_url)}" target="_blank" rel="noopener noreferrer">
-          <span>${esc(s.portal)} <small>${esc(s.source_url)}</small></span><span>↗</span></a>`).join("")}
-      </div>
-    </div>
-
-    <div class="sect">
-      <h5>Distances &amp; prices</h5>
+      <h5>Categories &amp; pacing</h5>
       ${rows}
     </div>
 
-    ${shots.length ? `<div class="sect"><h5>Entitlements</h5><div class="shots">
-      ${shots.map((e) => `<figure class="shot"><a href="${esc(e.image_url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(e.image_url)}" alt="${esc(e.title ?? e.kind ?? "entitlement")}" loading="lazy" /></a><figcaption>${esc(e.title ?? e.kind ?? "")}</figcaption></figure>`).join("")}
-    </div></div>` : ""}
+    ${kit ? `<div class="sect"><h5>Kit, size chart &amp; route</h5>${kit}</div>` : ""}
 
     ${notes.length ? `<div class="sect"><h5>Also included</h5><ul class="prose">${notes.map((e) => `<li>${esc(e.title)}</li>`).join("")}</ul></div>` : ""}
 
-    ${pack || keyDates ? `<div class="sect"><h5>Race pack &amp; key dates</h5><ul class="prose">${pack}${keyDates}</ul></div>` : ""}
+    ${pack || keyDates || ev.registration_deadline || ev.venue ? `<div class="sect"><h5>Race pack &amp; logistics</h5><ul class="prose">
+      ${ev.registration_deadline ? `<li>Registration closes <b>${esc(ev.registration_deadline)}</b></li>` : ""}
+      ${pack}
+      ${keyDates}
+      ${ev.venue ? `<li>Flag-off venue: ${esc(ev.venue)} ${mapLinks([ev.venue, ev.state].filter(Boolean).join(", "))}</li>` : ""}
+    </ul></div>` : ""}
 
     ${ev.registration_deadline ? `<div class="sect"><h5>Registration closes</h5><p class="prose">${esc(ev.registration_deadline)}</p></div>` : ""}
 
@@ -778,7 +875,9 @@ async function openDrawer(id) {
 
     <div class="sect" style="border-bottom:0">
       <button class="btn ${saved ? "" : "primary"}" id="drawerSave">${saved ? "Remove from My Season" : "★ Add to My Season"}</button>
-    </div>`;
+    </div>
+
+    ${checkout ? `<div class="checkoutbar">${checkout}</div>` : ""}`;
 
   $("#scrim").classList.add("open");
   document.body.style.overflow = "hidden";
@@ -789,6 +888,20 @@ async function openDrawer(id) {
 function closeDrawer() {
   $("#scrim").classList.remove("open");
   document.body.style.overflow = "";
+}
+
+/* ---------- lightbox (click any kit image to zoom) ---------- */
+function openLightbox(url, caption = "") {
+  $("#lightboxImg").src = url;
+  $("#lightboxImg").alt = caption;
+  $("#lightboxCap").textContent = caption;
+  $("#lightbox").classList.add("open");
+  $("#lightboxClose").focus();
+}
+
+function closeLightbox() {
+  $("#lightbox").classList.remove("open");
+  $("#lightboxImg").src = "";
 }
 
 /* ---------- my season ---------- */
@@ -936,8 +1049,19 @@ $("#grid").addEventListener("keydown", (e) => {
 });
 
 $("#scrim").addEventListener("click", (e) => { if (e.target.id === "scrim") closeDrawer(); });
+
+// Kit images open a zoom view instead of leaving the app.
+$("#drawer").addEventListener("click", (e) => {
+  const z = e.target.closest("[data-zoom]");
+  if (!z) return;
+  e.preventDefault();
+  openLightbox(z.dataset.zoom, z.dataset.caption ?? "");
+});
+$("#lightboxClose").addEventListener("click", closeLightbox);
+$("#lightbox").addEventListener("click", (e) => { if (e.target.id === "lightbox") closeLightbox(); });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
+    if ($("#lightbox").classList.contains("open")) return closeLightbox();
     closeDrawer();
     $("#seasonModal").classList.remove("open");
   }

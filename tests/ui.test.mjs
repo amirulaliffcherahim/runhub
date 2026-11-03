@@ -140,7 +140,7 @@ test("TC-UI-01: grid renders from the API, filters change the count, drawer show
   await page.click('.card[data-id="klscm-2026"]');
   await page.waitForSelector("#drawer .sect");
   const drawer = page.locator("#drawer");
-  assert.equal(await drawer.locator(".buy").count(), 2, "both portals must be offered");
+  assert.equal(await drawer.locator(".checkout").count(), 2, "both portals must be offered in the checkout bar");
   assert.match(await drawer.textContent(), /RM120/, "normal price for the 21km tier");
   assert.match(await drawer.textContent(), /RM160/, "normal price for the 42km tier");
   assert.equal(await drawer.locator(".shot img").count(), 2, "tee + medal images");
@@ -259,5 +259,61 @@ test("early-bird badge appears only while the cut-off is in the future (Z5)", { 
   assert.match(future[0], /Early bird ends in \d+d/);
   assert.equal(await page.locator('.card[data-id="eb-past"] .tag.eb').count(), 0, "expired cut-off shows nothing");
 
+  await page.close();
+});
+
+test("drawer: categories matrix shows cut-off, needed pace, min age and finisher tee (Z6)", { skip }, async () => {
+  const { saveEvent } = await import("../db.mjs");
+  await saveEvent(ctx.db, {
+    id: "matrix-2026", title: "Matrix Half Marathon 2099", start_date: "2099-07-01", state: "Selangor",
+    status: "open", venue: "Dataran Merdeka",
+    categories: [
+      { distance_km: 21.1, label: "21.1KM Competitive", price_early: 90, price_normal: 120, flag_off_time: "4:00am", cutoff_time: "4 hours", min_age: 18, finisher_tee: true },
+      { distance_km: 5, label: "5KM Fun Run", price_normal: 50, flag_off_time: "6:30am", cutoff_time: "1 hour", min_age: 7, finisher_tee: false },
+    ],
+    entitlements: [
+      { kind: "event_tee", title: "Event Tee", image_url: "https://example.test/tee.jpg" },
+      { kind: "size_chart", title: "Size Chart", image_url: "https://example.test/size.jpg" },
+    ],
+    race_pack: [{ date: "2099-06-28", time: "10:00am - 6:00pm", venue: "Mid Valley" }],
+    sources: [{ portal: "howei", source_url: "https://howei.com/event_details/matrix" }],
+  });
+
+  const page = await browser.newPage();
+  await page.goto(base, { waitUntil: "networkidle" });
+  await page.click('.card[data-id="matrix-2026"]');
+  await page.waitForSelector("#drawer .sect");
+  const text = await page.locator("#drawer").textContent();
+
+  assert.match(text, /4 hours/, "cut-off column");
+  assert.match(text, /11:22\/km|11:23\/km/, "needed pace for 21.1km in 4h");
+  assert.match(text, /18\+ yrs/, "min age");
+  assert.match(text, /finisher tee/i, "finisher tee marker");
+  assert.doesNotMatch(await page.locator("#drawer").textContent(), /finisher tee.*5KM/s, "5KM has no finisher tee");
+
+  // Kit is grouped by kind.
+  assert.ok(await page.locator("#drawer .kitgroup").count() >= 2, "tee and size chart groups");
+
+  // Race pack has map deep links.
+  assert.ok(await page.locator("#drawer .maplink").count() >= 2, "Maps + Waze");
+
+  // Checkout bar offers the selling portal with a price.
+  const checkout = await page.locator("#drawer .checkout").allTextContents();
+  assert.ok(checkout.some((c) => /Checkout on howei/.test(c) && /RM50/.test(c)), `checkout bar: ${checkout.join(" | ")}`);
+
+  await page.close();
+});
+
+test("drawer: kit image opens a lightbox and Escape closes it (Z6)", { skip }, async () => {
+  const page = await browser.newPage();
+  await page.goto(base, { waitUntil: "networkidle" });
+  await page.click('.card[data-id="matrix-2026"]');
+  await page.waitForSelector("#drawer .shot a[data-zoom]");
+  await page.click("#drawer .shot a[data-zoom]");
+  await page.waitForSelector("#lightbox.open");
+  assert.match(await page.locator("#lightboxImg").getAttribute("src"), /example\.test/);
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector("#lightbox").classList.contains("open"));
+  assert.ok(await page.locator("#scrim.open").count(), "drawer stays open under the lightbox");
   await page.close();
 });
