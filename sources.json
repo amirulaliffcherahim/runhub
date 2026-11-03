@@ -84,7 +84,7 @@
     },
 
     "emas": {
-      "enabled": false,
+      "enabled": true,
       "type": "ai",
       "baseUrl": "https://emas.etranspay.com",
       "listUrls": ["/emas/portal"],
