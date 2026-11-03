@@ -1,6 +1,8 @@
 import { fetchWithRetry } from "./fetch.mjs";
 import { toIso } from "./dates.mjs";
 import { stripHtml } from "./html.mjs";
+import { pmap, settle } from "./pool.mjs";
+import { urlFor, cutoffDate } from "./config.mjs";
 
 const BASE = "https://howei.com";
 
@@ -18,8 +20,20 @@ export function parseFeed(xml) {
   return [...new Set(slugs)];
 }
 
+/**
+ * `/calendar` embeds the whole archive as a JS array: `start: "2026-11-21T..."`, `url: '.../event_details/<slug>'`.
+ * ~2,100 entries, only ~80 upcoming - far more than `/events` (34) or the feed (30).
+ * Returns [{ date, slug }].
+ */
+export function parseCalendar(html) {
+  const re = /start:\s*"(\d{4}-\d{2}-\d{2})T[^"]*"[^}]*?title:\s*"[^"]*"[^}]*?url:\s*'[^']*event_details\/([^']+)'/g;
+  const seen = new Map();
+  for (const m of html.matchAll(re)) seen.set(m[2], m[1]);
+  return [...seen].map(([slug, date]) => ({ slug, date }));
+}
+
 /** Detail page for one event. */
-export function parseDetail(html, slug) {
+export function parseDetail(html, slug, base = BASE) {
   const rawTitle = (html.match(/<title>([\s\S]*?)<\/title>/) ?? [])[1] ?? slug;
   const title = stripHtml(rawTitle).replace(/\s*\|\s*Howei.*$/i, "");
 
@@ -99,37 +113,49 @@ export function parseDetail(html, slug) {
       status: "open",
     })),
     entitlements,
-    sources: [{ portal: "howei", source_url: `${BASE}/event_details/${slug}` }],
+    sources: [{ portal: "howei", source_url: `${base}/event_details/${slug}` }],
   };
 }
 
-export async function scrapeHowei() {
+export async function scrapeHowei(cfg = {}) {
+  const c = {
+    baseUrl: BASE, listPaths: ["/events"], feedPath: "/events/feed", calendarPath: "/calendar",
+    concurrency: 4, timeoutMs: 15000, retries: 1, ...cfg,
+  };
+  const opts = { timeoutMs: c.timeoutMs };
   const errors = [];
   const slugs = new Set();
+  const cutoff = cutoffDate(c);
 
-  const list = await fetchWithRetry(`${BASE}/events`);
-  if (list.status === 200) parseList(list.text).forEach((s) => slugs.add(s));
-  else errors.push(`howei list: ${list.status}`);
-
-  const feed = await fetchWithRetry(`${BASE}/events/feed`);
-  if (feed.status === 200) parseFeed(feed.text).forEach((s) => slugs.add(s));
-  else errors.push(`howei feed: ${feed.status}`);
+  for (const p of c.listPaths) {
+    const list = await fetchWithRetry(urlFor(c, p), c.retries, opts);
+    if (list.status === 200) parseList(list.text).forEach((s) => slugs.add(s));
+    else errors.push(`howei list ${p}: ${list.status}`);
+  }
+  if (c.feedPath) {
+    const feed = await fetchWithRetry(urlFor(c, c.feedPath), c.retries, opts);
+    if (feed.status === 200) parseFeed(feed.text).forEach((s) => slugs.add(s));
+    else errors.push(`howei feed: ${feed.status}`);
+  }
+  if (c.calendarPath) {
+    const cal = await fetchWithRetry(urlFor(c, c.calendarPath), c.retries, opts);
+    if (cal.status === 200) {
+      for (const { slug, date } of parseCalendar(cal.text)) if (!cutoff || date >= cutoff) slugs.add(slug);
+    } else errors.push(`howei calendar: ${cal.status}`);
+  }
 
   if (slugs.size === 0) throw new Error(`howei: no event slugs found (${errors.join("; ")})`);
 
-  const events = [];
-  for (const slug of slugs) {
-    const res = await fetchWithRetry(`${BASE}/event_details/${slug}`);
-    if (res.status !== 200) {
-      errors.push(`howei detail ${slug}: ${res.status}`);
-      continue;
-    }
-    try {
-      events.push(parseDetail(res.text, slug));
-    } catch (e) {
-      errors.push(`howei parse ${slug}: ${e.message}`);
-    }
-  }
+  const items = [...slugs];
+  const results = await pmap(
+    items,
+    async (slug) => {
+      const res = await fetchWithRetry(`${c.baseUrl}/event_details/${slug}`, c.retries, opts);
+      if (res.status !== 200) throw new Error(`${res.status}`);
+      return parseDetail(res.text, slug, c.baseUrl);
+    },
+    c.concurrency
+  );
 
-  return { portal: "howei", events, errors };
+  return { portal: "howei", events: settle(results, items, "howei detail", errors), errors };
 }

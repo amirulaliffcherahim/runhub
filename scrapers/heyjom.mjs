@@ -54,8 +54,9 @@ export function parseCalendar(html) {
   return out;
 }
 
-export async function scrapeHeyJom() {
-  const res = await fetchWithRetry(`${BASE}/`);
+export async function scrapeHeyJom(cfg = {}) {
+  const base = (cfg.baseUrl ?? BASE).replace(/\/+$/, "");
+  const res = await fetchWithRetry(`${base}/`, cfg.retries ?? 1, { timeoutMs: cfg.timeoutMs ?? 15000 });
   if (res.status !== 200) throw new Error(`heyjom: ${res.status}`);
   return { portal: "heyjom", events: parseCalendar(res.text), errors: [] };
 }

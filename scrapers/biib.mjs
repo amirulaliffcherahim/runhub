@@ -1,6 +1,8 @@
 import { fetchWithRetry } from "./fetch.mjs";
 import { toIso } from "./dates.mjs";
 import { stripHtml } from "./html.mjs";
+import { pmap } from "./pool.mjs";
+import { urlFor } from "./config.mjs";
 
 const BASE = "https://getbiib.com";
 
@@ -22,7 +24,7 @@ export function parseList(html) {
 }
 
 /** Detail page: og tags carry the authoritative title/blurb/banner. */
-export function parseDetail(html, eventId) {
+export function parseDetail(html, eventId, base = BASE) {
   const meta = (prop) =>
     (html.match(new RegExp(`property="${prop}" content="([^"]*)"`)) ?? [])[1] ?? null;
 
@@ -69,32 +71,49 @@ export function parseDetail(html, eventId) {
       status: "open",
     })),
     entitlements: [],
-    sources: [{ portal: "biib", source_url: `${BASE}/events/${eventId}` }],
+    sources: [{ portal: "biib", source_url: `${base}/events/${eventId}` }],
   };
 }
 
-export async function scrapeBiib() {
-  const list = await fetchWithRetry(`${BASE}/events`);
-  if (list.status !== 200) throw new Error(`biib list: ${list.status}`);
-
-  const events = [];
+export async function scrapeBiib(cfg = {}) {
+  const c = { baseUrl: BASE, listPath: "/events", maxPages: 6, concurrency: 4, timeoutMs: 15000, retries: 1, ...cfg };
+  const opts = { timeoutMs: c.timeoutMs };
   const errors = [];
 
-  for (const stub of parseList(list.text)) {
-    const eventId = stub.id.replace(/^biib-/, "");
-    const res = await fetchWithRetry(`${BASE}/events/${eventId}`);
+  // `/events?page=N` pages through the whole catalogue (~216 events over 10 pages).
+  // Stop as soon as a page adds nothing new.
+  const stubs = new Map();
+  for (let page = 1; page <= c.maxPages; page++) {
+    const res = await fetchWithRetry(`${urlFor(c, c.listPath)}?page=${page}`, c.retries, opts);
     if (res.status !== 200) {
-      errors.push(`biib detail ${eventId}: ${res.status}`);
-      events.push(stub); // keep the list-level data rather than drop the race
-      continue;
+      if (page === 1) throw new Error(`biib list: ${res.status}`);
+      errors.push(`biib list page ${page}: ${res.status}`);
+      break;
     }
-    try {
-      events.push(parseDetail(res.text, eventId));
-    } catch (e) {
-      errors.push(`biib parse ${eventId}: ${e.message}`);
-      events.push(stub);
-    }
+    const before = stubs.size;
+    for (const s of parseList(res.text)) if (!stubs.has(s.id)) stubs.set(s.id, s);
+    if (stubs.size === before) break;
   }
 
-  return { portal: "biib", events, errors };
+  const list = [...stubs.values()];
+  const results = await pmap(
+    list,
+    async (stub) => {
+      const eventId = stub.id.replace(/^biib-/, "");
+      const res = await fetchWithRetry(`${c.baseUrl}/events/${eventId}`, c.retries, opts);
+      if (res.status !== 200) {
+        errors.push(`biib detail ${eventId}: ${res.status}`);
+        return stub; // keep the list-level data rather than drop the race
+      }
+      try {
+        return parseDetail(res.text, eventId, c.baseUrl);
+      } catch (e) {
+        errors.push(`biib parse ${eventId}: ${e.message}`);
+        return stub;
+      }
+    },
+    c.concurrency
+  );
+
+  return { portal: "biib", events: results.filter((r) => r.ok && r.value).map((r) => r.value), errors };
 }

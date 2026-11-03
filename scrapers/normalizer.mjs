@@ -7,15 +7,36 @@
  * multiple official buy links.
  */
 
-const RICHNESS = { racexasia: 5, howei: 4, jomrun: 3, biib: 2, heyjom: 1 };
+const RICHNESS = { racexasia: 5, howei: 4, jomrun: 3, ticket2u: 2, biib: 2, heyjom: 1 };
+
+/** Canonical form of a ticket URL, so the same page matches across portals. */
+export function normaliseUrl(u) {
+  try {
+    const x = new URL(u);
+    const path = x.pathname.replace(/\/+$/, "").toLowerCase();
+    // A bare host (e.g. HeyJom's fallback "calendar.heyjom.com/") names no specific race.
+    if (!path) return null;
+    return `${x.hostname.replace(/^www\./, "").toLowerCase()}${path}`;
+  } catch {
+    return null;
+  }
+}
+
+// A listing-only aggregator link is not proof of identity: two different races can share it.
+const NON_IDENTITY_PORTALS = new Set(["lesgo"]);
 
 /** Lowercase, drop years/edition noise, collapse whitespace. */
 export function normaliseTitle(title) {
   return String(title ?? "")
     .toLowerCase()
+    .replace(/\[[^\]]*\]/g, " ") // "[Virtual Run] ..."
+    .replace(/\(\s*(?:event\s+)?cancel(?:l?ed)?\s*\)/g, " ")
+    .replace(/\b(?:powered|presented|organi[sz]ed|brought) by\b.*$/g, " ") // sponsor tail
+    .replace(/\(\s*(?:powered|presented) by[^)]*\)/g, " ")
+    .replace(/\bjomrun\b/g, " ")
     .replace(/\b20\d{2}\b/g, "")
     .replace(/\b\d+(st|nd|rd|th)\b/g, "")
-    .replace(/\b(edition|annual|presented by|powered by)\b/g, "")
+    .replace(/\b(edition|annual|the)\b/g, "")
     .replace(/[^a-z0-9 ]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -64,25 +85,41 @@ function mergeInto(base, incoming) {
  */
 export function dedupe(events) {
   const buckets = [];
+  const urlOwner = new Map(); // normalised ticket URL -> bucket
+
+  const urlsOf = (ev) =>
+    (ev.sources ?? [])
+      .filter((s) => !NON_IDENTITY_PORTALS.has(s.portal))
+      .map((s) => normaliseUrl(s.source_url))
+      .filter(Boolean);
 
   for (const ev of events) {
     if (!ev?.title) continue;
     const t = normaliseTitle(ev.title);
     if (!t) continue;
+    const urls = urlsOf(ev);
 
-    const hit = buckets.find(
+    // 1) Same official ticket URL => same race, regardless of title wording.
+    // 2) Otherwise: same normalised title + (same state or dates within a day).
+    // The date guard stops one shared ticket page from fusing two different races.
+    let hit = urls
+      .map((u) => urlOwner.get(u))
+      .find((b) => b && (!b.start_date || !ev.start_date || dayDiff(b.start_date, ev.start_date) <= 3));
+    hit ??= buckets.find(
       (b) =>
         b.title === t &&
         ((b.state && ev.state && b.state === ev.state) || dayDiff(b.start_date, ev.start_date) <= 1)
     );
 
     if (!hit) {
-      buckets.push({ title: t, state: ev.state ?? null, start_date: ev.start_date ?? null, events: [ev] });
-      continue;
+      hit = { title: t, state: ev.state ?? null, start_date: ev.start_date ?? null, events: [ev] };
+      buckets.push(hit);
+    } else {
+      hit.events.push(ev);
+      if (!hit.state) hit.state = ev.state ?? null;
+      if (!hit.start_date) hit.start_date = ev.start_date ?? null;
     }
-    hit.events.push(ev);
-    if (!hit.state) hit.state = ev.state ?? null;
-    if (!hit.start_date) hit.start_date = ev.start_date ?? null;
+    for (const u of urls) urlOwner.set(u, hit);
   }
 
   return buckets.map((b) => {

@@ -1,6 +1,8 @@
 import { fetchWithRetry } from "./fetch.mjs";
 import { parsePhpDump } from "./phpdump.mjs";
 import { stripHtml } from "./html.mjs";
+import { pmap, settle } from "./pool.mjs";
+import { urlFor } from "./config.mjs";
 
 const BASE = "https://www.racexasia.com";
 
@@ -11,7 +13,7 @@ export function parseList(html) {
 }
 
 /** Map one RaceXasia detail page to the normalised event shape. */
-export function parseDetail(html, slug) {
+export function parseDetail(html, slug, base = BASE) {
   const dumpMatch = html.match(/<!--\s*<pre>([\s\S]*?)<\/pre>/);
   if (!dumpMatch) throw new Error(`racexasia: no embedded dump in ${slug}`);
   const dump = parsePhpDump(dumpMatch[1]);
@@ -67,36 +69,39 @@ export function parseDetail(html, slug) {
     key_dates: keyDates,
     race_pack: racePack,
     registration_url:
-      info.external_registration_link || info.registration_link || `${BASE}/event/${slug}`,
+      info.external_registration_link || info.registration_link || `${base}/event/${slug}`,
     sources: [
       {
         portal: "racexasia",
-        source_url: info.external_registration_link || `${BASE}/event/${slug}`,
+        source_url: info.external_registration_link || `${base}/event/${slug}`,
       },
     ],
   };
 }
 
-export async function scrapeRaceXasia() {
-  const list = await fetchWithRetry(`${BASE}/events`);
-  if (list.status !== 200) throw new Error(`racexasia list: ${list.status}`);
-  const slugs = parseList(list.text);
-
-  const events = [];
+export async function scrapeRaceXasia(cfg = {}) {
+  const c = { baseUrl: BASE, listPaths: ["/events"], concurrency: 4, timeoutMs: 15000, retries: 1, ...cfg };
+  const opts = { timeoutMs: c.timeoutMs };
   const errors = [];
+  const slugs = new Set();
 
-  for (const slug of slugs) {
-    const res = await fetchWithRetry(`${BASE}/event/${slug}`);
-    if (res.status !== 200) {
-      errors.push(`racexasia detail ${slug}: ${res.status}`);
-      continue;
-    }
-    try {
-      events.push(parseDetail(res.text, slug));
-    } catch (e) {
-      errors.push(`racexasia parse ${slug}: ${e.message}`);
-    }
+  for (const p of c.listPaths) {
+    const list = await fetchWithRetry(urlFor(c, p), c.retries, opts);
+    if (list.status === 200) parseList(list.text).forEach((s) => slugs.add(s));
+    else errors.push(`racexasia list ${p}: ${list.status}`);
   }
+  if (!slugs.size) throw new Error(`racexasia: no events (${errors.join("; ") || "empty list"})`);
 
-  return { portal: "racexasia", events, errors };
+  const items = [...slugs];
+  const results = await pmap(
+    items,
+    async (slug) => {
+      const res = await fetchWithRetry(`${c.baseUrl}/event/${slug}`, c.retries, opts);
+      if (res.status !== 200) throw new Error(`${res.status}`);
+      return parseDetail(res.text, slug, c.baseUrl);
+    },
+    c.concurrency
+  );
+
+  return { portal: "racexasia", events: settle(results, items, "racexasia detail", errors), errors };
 }

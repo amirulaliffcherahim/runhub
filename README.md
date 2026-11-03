@@ -41,6 +41,12 @@ A daily task `RunHub-DailySync` runs `run-sync.cmd` at 07:00 and logs to `logs/s
 - `public/index.html` — UI (self-contained, no CDN)
 - `run-sync.cmd` — Windows Task Scheduler wrapper
 
+## Adding a source
+
+Edit `sources.json`. Set `"enabled": false` to switch a portal off. A new portal needs a scraper:
+add `scrapers/<name>.mjs` exporting `scrape<Name>(cfg)` returning `{ events, errors }`, register its
+`type` in `REGISTRY` in `sync.mjs`, then add its entry (with `baseUrl`) to `sources.json`.
+
 ## Known limits
 
 - CheckpointSpot is still behind Cloudflare (needs Playwright + credentials in `.env`).

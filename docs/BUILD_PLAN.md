@@ -449,3 +449,66 @@ DB:   134 events, 139 sources, 5 multi-source merges
 - **`social.mjs`** — stub only; needs a target list and an account.
 - 17/134 events still have no state (virtual runs, `MyCity RUN`, `STAKAN National Day Night
   Run`). They are kept, not guessed; the state filter simply excludes them.
+
+## 14. Coverage expansion + `sources.json` (2026-11-03)
+
+**Problem.** The app showed 134 events. Probing each portal showed we were reading one list page
+of each, while the portals hold far more.
+
+### What the probe found
+
+| Portal | We fetched | Actually available |
+|---|---|---|
+| Ticket2U | 18 (page 1 of `sport`, all sub-categories) | `scc=running` 1,093 + `scc=marathon` 134, paged via `currentpage`, newest-first with `status: upcoming|expired` |
+| BiiB | 24 (page 1) | `/events?page=N` pages through ~216 events over 10 pages |
+| Howei | 34 (`/events`) + 30 (feed) | `/calendar` embeds the **whole archive** (2,146 entries, ~84 upcoming) as a JS array |
+| JomRun | 16 (`/events`) | `/event_search` lists ~44; `/events?page=N` does **not** page (silently returns page 1) |
+| RaceXasia | 16 | 16 (no paging, no sitemap) |
+| HeyJom | 47 | 47 (month params are ignored) |
+| **Lesgo.My** | 0 | **1,769 events, 212 upcoming**, all portals incl. CheckpointSpot, via the public WordPress REST API |
+| CheckpointSpot | 0 (Cloudflare 403) | reachable indirectly: Lesgo's `offers.url` links to it |
+| JomLari2U | 0 | detail pages return HTTP 500 server-side - disabled |
+
+### Changes
+
+- **`sources.json`** is the single place that lists base URLs, list paths, paging limits and
+  per-source `enabled`/`concurrency`/`retries`. `scrapers/config.mjs` validates it (http(s) only,
+  loud errors) and `sync.mjs` builds scrapers from it via `REGISTRY`. An unknown `type` is a
+  reported failure, not a silent skip.
+- **New `scrapers/lesgo.mjs`**: REST list (state/distance taxonomy ids -> names) + the Yoast
+  description for date and venue, then one detail fetch per *upcoming* event to read the official
+  ticket link from the `Event` JSON-LD `offers.url`. That link is stored as the primary source
+  (filed under its real portal, e.g. `checkpointspot`), with the Lesgo listing kept second.
+  One-off `access_token=` query params are stripped and non-http(s) links are dropped.
+- **Dedupe now matches on the official ticket URL first** (`normaliseUrl`), then title+state/date.
+  Guarded two ways: a bare host (HeyJom's fallback) and the Lesgo listing link are never an
+  identity, and a URL match is refused if the dates are >3 days apart.
+- `normaliseTitle` strips sponsor tails (`Powered by ...`), `[Virtual Run]`, `(EVENT CANCEL)`,
+  `JomRun`, so `Kulai Half Marathon 2026 Powered by JomRun` == `Kulai Half Marathon`.
+- `scrapers/pool.mjs` (`pmap`/`settle`): bounded concurrency with per-item failure isolation.
+  Details were serial before; the whole sync is now about 60s instead of ~180s.
+- `fetchWithRetry` retries 429/5xx and network errors with doubling backoff (404 is never
+  retried). Lesgo returned intermittent HTTP 500 at concurrency 4; at concurrency 2 with 3
+  retries it returned 0 errors.
+- `decodeEntities` now handles numeric entities (`&#8211;`, `&#038;`) - WordPress emits these.
+- `upcomingOnly` + `graceDays` (default 3) skip past events per source, so a 2,000-entry
+  archive does not turn into 2,000 detail fetches.
+
+### Result (live, 2026-11-03)
+
+```
+before: 134 events
+after : 456 scraped-unique -> 435 stored; 263 upcoming; 0 errors; ~60s
+        racexasia 16 | jomrun 49 | howei 114 | biib 144 | heyjom 48 | ticket2u 162 | lesgo 245
+        93% have a state; 234 events listed on 2+ portals; 55 link to CheckpointSpot
+```
+
+### Known limits
+
+- Lesgo-only: 7 upcoming events have no official ticket link on Lesgo; they carry only the Lesgo
+  listing as their "buy" link.
+- 2 near-duplicate pairs remain (`Panda Joy Fun Run - Taman Bukit Jalil` vs `PANDA JOY FUN RUN`;
+  a Chinese/English charity-walk title). Left alone rather than loosening the title match.
+- Coverage is only as complete as Lesgo's own submissions plus the public portals. Events that
+  exist only on Facebook/Instagram or on CheckpointSpot and were never listed on Lesgo are still
+  missing (see `work.md`).

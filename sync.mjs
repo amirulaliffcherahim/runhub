@@ -15,17 +15,35 @@ import { scrapeHowei } from "./scrapers/howei.mjs";
 import { scrapeBiib } from "./scrapers/biib.mjs";
 import { scrapeHeyJom } from "./scrapers/heyjom.mjs";
 import { scrapeTicket2U } from "./scrapers/ticket2u.mjs";
+import { scrapeLesgo } from "./scrapers/lesgo.mjs";
+import { loadSources } from "./scrapers/config.mjs";
 
-export const SCRAPERS = [
-  ["racexasia", scrapeRaceXasia],
-  ["jomrun", scrapeJomRun],
-  ["howei", scrapeHowei],
-  ["biib", scrapeBiib],
-  ["heyjom", scrapeHeyJom],
-  ["ticket2u", scrapeTicket2U],
-];
+/** `type` in sources.json -> scraper. A source whose type is unknown is reported, not ignored. */
+export const REGISTRY = {
+  racexasia: scrapeRaceXasia,
+  jomrun: scrapeJomRun,
+  howei: scrapeHowei,
+  biib: scrapeBiib,
+  heyjom: scrapeHeyJom,
+  ticket2u: scrapeTicket2U,
+  lesgo: scrapeLesgo,
+};
 
-export async function runSync({ dbPath, log = console.log, scrapers = SCRAPERS } = {}) {
+/**
+ * Build `[name, fn]` pairs from sources.json. Each scraper receives its own config
+ * (baseUrl, paths, limits) so adding/removing a portal is a config edit.
+ */
+export function buildScrapers(sources = loadSources()) {
+  return sources.map((cfg) => {
+    const fn = REGISTRY[cfg.type];
+    if (!fn) {
+      return [cfg.name, async () => { throw new Error(`unknown source type "${cfg.type}" (see sources.json)`); }];
+    }
+    return [cfg.name, () => fn(cfg)];
+  });
+}
+
+export async function runSync({ dbPath, log = console.log, scrapers = buildScrapers() } = {}) {
   const db = openDb(dbPath);
   const startedAt = new Date().toISOString();
 
@@ -45,6 +63,13 @@ export async function runSync({ dbPath, log = console.log, scrapers = SCRAPERS }
       errors.push(`${name}: ${e.message}`);
       log(`  ${name}: FAILED - ${e.message}`);
     }
+  }
+
+  // Remember which portal each event came from, for the per-portal summary below.
+  const perPortal = {};
+  for (const ev of collected) {
+    const p = ev.sources?.[0]?.portal ?? "?";
+    perPortal[p] = (perPortal[p] ?? 0) + 1;
   }
 
   // Quality gate (BUILD_PLAN 7 boundary rules): canonical state first (dedupe uses it),
@@ -81,6 +106,7 @@ export async function runSync({ dbPath, log = console.log, scrapers = SCRAPERS }
 
   const counts = {
     scraped: collected.length,
+    per_portal: perPortal,
     unique: merged.length,
     pruned,
     skipped_undated: skippedUndated,

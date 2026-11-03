@@ -1,4 +1,6 @@
 import { toIso } from "./dates.mjs";
+import { fetchJson } from "./fetch.mjs";
+import { urlFor } from "./config.mjs";
 
 const BASE = "https://www.ticket2u.com.my";
 const API = `${BASE}/api/api2.ashx`;
@@ -49,32 +51,47 @@ export function parseListing(json) {
   return events;
 }
 
-export async function scrapeTicket2U() {
-  // The shared fetchWithRetry is GET-only; the listing needs a POST.
-  const body = JSON.stringify({ method: "eventlisting", data: { cc: "sport", stateid: "" } });
-  let lastError = null;
+export async function scrapeTicket2U(cfg = {}) {
+  const c = {
+    baseUrl: BASE,
+    apiPath: "/api/api2.ashx",
+    categories: [{ cc: "sport", scc: "running" }, { cc: "sport", scc: "marathon" }],
+    maxPages: 70,
+    stopAfterExpiredPages: 3,
+    timeoutMs: 15000,
+    retries: 1,
+    ...cfg,
+  };
+  const errors = [];
+  const byId = new Map();
+  const api = urlFor(c, c.apiPath);
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await fetch(API, {
-        method: "POST",
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body,
-        signal: AbortSignal.timeout(15000),
+  // Each category list is ordered newest-first with `status` upcoming|expired.
+  // Page until `stopAfterExpiredPages` consecutive pages hold no upcoming event.
+  for (const cat of c.categories) {
+    let expiredRun = 0;
+    for (let page = 1; page <= c.maxPages; page++) {
+      const res = await fetchJson(api, c.retries, {
+        timeoutMs: c.timeoutMs,
+        body: { method: "eventlisting", data: { ...cat, stateid: "", currentpage: page } },
       });
-      if (!res.ok) throw new Error(`ticket2u api: ${res.status}`);
-      const json = await res.json();
-      if (json.haserror) throw new Error(`ticket2u api: ${json.message ?? "error"}`);
-      return { portal: "ticket2u", events: parseListing(json), errors: [] };
-    } catch (e) {
-      lastError = e;
+      if (res.status !== 200 || !res.json) {
+        if (page === 1 && byId.size === 0) throw new Error(`ticket2u api: ${res.status}`);
+        errors.push(`ticket2u ${cat.scc ?? cat.cc} page ${page}: ${res.status}`);
+        break;
+      }
+      if (res.json.haserror) throw new Error(`ticket2u api: ${res.json.message ?? "error"}`);
+
+      const rows = res.json.data ?? [];
+      if (!rows.length) break;
+
+      const upcoming = rows.filter(({ row }) => row?.status !== "expired").length;
+      for (const ev of parseListing(res.json)) if (!byId.has(ev.id)) byId.set(ev.id, ev);
+
+      expiredRun = upcoming === 0 ? expiredRun + 1 : 0;
+      if (expiredRun >= c.stopAfterExpiredPages) break;
     }
   }
 
-  throw new Error(lastError?.message ?? "ticket2u: unknown error");
+  return { portal: "ticket2u", events: [...byId.values()], errors };
 }

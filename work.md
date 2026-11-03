@@ -24,6 +24,13 @@ This file tracks what is left. Order = priority.
 - Blocked: needs a target list + a dedicated account. Disabled by default.
 - Lowest priority.
 
+## Coverage ideas (biggest lever for "all events in Malaysia")
+
+- Lesgo.My is now the backbone (it lists every portal). Add other directories the same way: `racingschedule.com/races/my`, `ahotu.com` (Cloudflare), `emas.etranspay.com` (Cloudflare).
+- Generic `jsonld` source type: give `baseUrl` + list pages + a link regex, read schema.org `Event` JSON-LD. Lets a new portal be added from `sources.json` alone.
+- Re-enable JomLari2U when its detail pages stop returning 500.
+- Lesgo `race_result` / `running_club` taxonomies hold organiser + club pages that could seed FB/IG targets.
+
 ## Data quality
 
 - 17/134 events have no state (virtual runs, `MyCity RUN`, `STAKAN National Day Night Run`). Consider a "Virtual" flag instead of a null state.

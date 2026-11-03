@@ -1,0 +1,86 @@
+{
+  "_readme": [
+    "RunHub source list. Add or remove portals here; no code change needed for 'jsonld' sources.",
+    "enabled:false skips a source. 'type' picks the scraper (defaults to the key name).",
+    "Built-in types: racexasia, jomrun, howei, biib, heyjom, ticket2u, lesgo.",
+    "Generic type 'jsonld': give baseUrl + listUrls (pages that link to events) + linkPattern (regex",
+    "matched against hrefs). Each event page is read for schema.org Event JSON-LD."
+  ],
+
+  "defaults": {
+    "concurrency": 4,
+    "timeoutMs": 20000,
+    "retries": 1,
+    "upcomingOnly": true,
+    "graceDays": 3
+  },
+
+  "sources": {
+    "racexasia": {
+      "enabled": true,
+      "baseUrl": "https://www.racexasia.com",
+      "listPaths": ["/events"]
+    },
+
+    "jomrun": {
+      "enabled": true,
+      "baseUrl": "https://www.jomrun.com",
+      "listPaths": ["/events", "/event_search"]
+    },
+
+    "howei": {
+      "enabled": true,
+      "baseUrl": "https://howei.com",
+      "listPaths": ["/events"],
+      "feedPath": "/events/feed",
+      "calendarPath": "/calendar"
+    },
+
+    "biib": {
+      "enabled": true,
+      "baseUrl": "https://getbiib.com",
+      "listPath": "/events",
+      "maxPages": 6
+    },
+
+    "heyjom": {
+      "enabled": true,
+      "baseUrl": "https://calendar.heyjom.com"
+    },
+
+    "ticket2u": {
+      "enabled": true,
+      "baseUrl": "https://www.ticket2u.com.my",
+      "apiPath": "/api/api2.ashx",
+      "categories": [
+        { "cc": "sport", "scc": "running" },
+        { "cc": "sport", "scc": "marathon" }
+      ],
+      "maxPages": 70,
+      "stopAfterExpiredPages": 3
+    },
+
+    "lesgo": {
+      "enabled": true,
+      "baseUrl": "https://lesgo.my",
+      "concurrency": 2,
+      "retries": 3,
+      "restPath": "/wp-json/wp/v2/event",
+      "stateTaxonomyPath": "/wp-json/wp/v2/race_state",
+      "perPage": 100,
+      "maxPages": 20
+    },
+
+    "checkpointspot": {
+      "enabled": false,
+      "baseUrl": "https://checkpointspot.asia",
+      "note": "Cloudflare 403. Needs Playwright + credentials. Covered indirectly through lesgo."
+    },
+
+    "jomlari2u": {
+      "enabled": false,
+      "baseUrl": "https://www.jomlari2u.com",
+      "note": "Detail pages return HTTP 500 (event.categories.map). Re-enable when fixed."
+    }
+  }
+}

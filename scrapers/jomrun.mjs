@@ -1,6 +1,8 @@
 import { fetchWithRetry } from "./fetch.mjs";
 import { toIso } from "./dates.mjs";
 import { stripHtml } from "./html.mjs";
+import { pmap, settle } from "./pool.mjs";
+import { urlFor } from "./config.mjs";
 
 const BASE = "https://www.jomrun.com";
 const S3 = "https://s3-ap-southeast-1.amazonaws.com/jomrun-images-new";
@@ -12,7 +14,7 @@ export function parseList(html) {
 }
 
 /** `/event/<slug>` detail page. */
-export function parseDetail(html, slug) {
+export function parseDetail(html, slug, base = BASE) {
   // The right-hand meta card holds date / time / venue.
   const metaBlock = html.match(/class="card events-meta[\s\S]*?<\/ul>/);
   const meta = metaBlock ? metaBlock[0] : "";
@@ -97,30 +99,34 @@ export function parseDetail(html, slug) {
     entitlements,
     race_pack: rpc ? [{ date: null, time: null, venue: stripHtml(rpc[1]) }] : [],
     registration_deadline: regEnd ? stripHtml(regEnd[1]) : null,
-    sources: [{ portal: "jomrun", source_url: `${BASE}/event/${slug}` }],
+    sources: [{ portal: "jomrun", source_url: `${base}/event/${slug}` }],
   };
 }
 
-export async function scrapeJomRun() {
-  const list = await fetchWithRetry(`${BASE}/events`);
-  if (list.status !== 200) throw new Error(`jomrun list: ${list.status}`);
-  const slugs = parseList(list.text);
-
-  const events = [];
+export async function scrapeJomRun(cfg = {}) {
+  // `/events` shows 16 cards; `/event_search` lists ~44, so read both.
+  const c = { baseUrl: BASE, listPaths: ["/events", "/event_search"], concurrency: 4, timeoutMs: 15000, retries: 1, ...cfg };
+  const opts = { timeoutMs: c.timeoutMs };
   const errors = [];
+  const slugs = new Set();
 
-  for (const slug of slugs) {
-    const res = await fetchWithRetry(`${BASE}/event/${slug}`);
-    if (res.status !== 200) {
-      errors.push(`jomrun detail ${slug}: ${res.status}`);
-      continue;
-    }
-    try {
-      events.push(parseDetail(res.text, slug));
-    } catch (e) {
-      errors.push(`jomrun parse ${slug}: ${e.message}`);
-    }
+  for (const p of c.listPaths) {
+    const list = await fetchWithRetry(urlFor(c, p), c.retries, opts);
+    if (list.status === 200) parseList(list.text).forEach((s) => slugs.add(s));
+    else errors.push(`jomrun list ${p}: ${list.status}`);
   }
+  if (!slugs.size) throw new Error(`jomrun: no events (${errors.join("; ") || "empty list"})`);
 
-  return { portal: "jomrun", events, errors };
+  const items = [...slugs];
+  const results = await pmap(
+    items,
+    async (slug) => {
+      const res = await fetchWithRetry(`${c.baseUrl}/event/${slug}`, c.retries, opts);
+      if (res.status !== 200) throw new Error(`${res.status}`);
+      return parseDetail(res.text, slug, c.baseUrl);
+    },
+    c.concurrency
+  );
+
+  return { portal: "jomrun", events: settle(results, items, "jomrun detail", errors), errors };
 }
