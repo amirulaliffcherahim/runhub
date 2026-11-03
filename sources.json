@@ -7,6 +7,14 @@
     "matched against hrefs). Each event page is read for schema.org Event JSON-LD."
   ],
 
+  "politeness": {
+    "_note": "Applied to every outbound request. A site's own Crawl-delay always wins, up to maxCrawlDelayMs.",
+    "respectRobots": true,
+    "defaultGapMs": 300,
+    "maxCrawlDelayMs": 10000,
+    "maxRequestsPerSync": 1500
+  },
+
   "defaults": {
     "concurrency": 4,
     "timeoutMs": 20000,
@@ -102,7 +110,7 @@
       "listUrls": ["/emas/portal"],
       "linkPattern": "href=\"([^\"]*/emas/portal/event/[^\"]+)\"",
       "maxEvents": 12,
-      "note": "AI crawler. Works, but this portal currently lists mostly finished races (0 upcoming)."
+      "note": "DO NOT ENABLE: robots.txt is 'Disallow: /' - we are not welcome there. Kept as a template."
     }
   }
 }

@@ -18,6 +18,20 @@ export function loadSources(path = DEFAULT_PATH) {
   return parseSources(raw);
 }
 
+/** The `politeness` block (robots + rate limits). Keys starting with _ are comments. */
+export function loadPoliteness(path = DEFAULT_PATH) {
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf8"));
+    const out = {};
+    for (const [k, v] of Object.entries(raw.politeness ?? {})) {
+      if (!k.startsWith("_")) out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export function parseSources(raw) {
   const defaults = { ...DEFAULTS, ...(raw.defaults ?? {}) };
   const sources = raw.sources;

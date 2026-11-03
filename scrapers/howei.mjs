@@ -1,6 +1,6 @@
 import { fetchWithRetry } from "./fetch.mjs";
 import { toIso } from "./dates.mjs";
-import { stripHtml } from "./html.mjs";
+import { stripHtml, decodeEntities } from "./html.mjs";
 import { pmap, settle } from "./pool.mjs";
 import { urlFor, cutoffDate } from "./config.mjs";
 
@@ -78,18 +78,44 @@ export function parseDetail(html, slug, base = BASE) {
   const priceLow = priceNumbers.length ? Math.min(...priceNumbers) : null;
   const priceHigh = priceNumbers.length ? Math.max(...priceNumbers) : null;
 
-  // T-shirt & medal images live in the dedicated tab.
-  const tshirtTab = html.match(/id="tshirt"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/);
-  const tshirtImages = [
-    ...new Set([...(tshirtTab?.[1] ?? "").matchAll(/<img[^>]+src="([^"]+)"/g)].map((m) => m[1])),
-  ];
+  // The t-shirt/medal tab carries a JSON blob with real titles:
+  //   data-images="[{&quot;title&quot;:&quot;Event Shirt&quot;,&quot;url&quot;:&quot;...&quot;}]"
+  const entitlements = [];
+  const seenImg = new Set();
+  for (const m of html.matchAll(/data-images="([^"]+)"/g)) {
+    let list;
+    try {
+      list = JSON.parse(decodeEntities(m[1]));
+    } catch {
+      continue;
+    }
+    for (const item of Array.isArray(list) ? list : []) {
+      if (!item?.url || seenImg.has(item.url)) continue;
+      seenImg.add(item.url);
+      const label = stripHtml(item.title) || "Race entitlement";
+      entitlements.push({
+        kind: /medal/i.test(label) ? "medal" : /shirt|tee|jersey|singlet/i.test(label) ? "event_tee" : "goodies",
+        title: label,
+        image_url: item.url,
+        notes: "",
+      });
+    }
+  }
 
-  const entitlements = tshirtImages.map((img) => ({
-    kind: /medal/i.test(img) ? "medal" : "event_tee",
-    title: /medal/i.test(img) ? "Finisher Medal" : "Event T-shirt",
-    image_url: img,
-    notes: "",
-  }));
+  // Fallback: the tab's <img> tags (untitled), so the pictures are never lost.
+  if (!entitlements.length) {
+    const tshirtTab = html.match(/id="tshirt"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/);
+    for (const m of (tshirtTab?.[1] ?? "").matchAll(/<img[^>]+src="([^"]+)"/g)) {
+      if (seenImg.has(m[1])) continue;
+      seenImg.add(m[1]);
+      entitlements.push({
+        kind: /medal/i.test(m[1]) ? "medal" : "event_tee",
+        title: /medal/i.test(m[1]) ? "Finisher Medal" : "Event T-shirt",
+        image_url: m[1],
+        notes: "",
+      });
+    }
+  }
 
   return {
     id: slug.toLowerCase(),

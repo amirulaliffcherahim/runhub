@@ -23,7 +23,9 @@ import { scrapeHeyJom } from "./scrapers/heyjom.mjs";
 import { scrapeTicket2U } from "./scrapers/ticket2u.mjs";
 import { scrapeLesgo } from "./scrapers/lesgo.mjs";
 import { scrapeAi } from "./scrapers/ai.mjs";
-import { loadSources } from "./scrapers/config.mjs";
+import { loadSources, loadPoliteness } from "./scrapers/config.mjs";
+import { configurePoliteness, POLITENESS } from "./scrapers/fetch.mjs";
+import { configureThrottle, throttleReport } from "./scrapers/throttle.mjs";
 
 /** `type` in sources.json -> scraper. An unknown type is reported, never ignored. */
 export const REGISTRY = {
@@ -52,6 +54,11 @@ export async function runSync({ db, dbPath, log = console.log, scrapers = buildS
   const ownDb = !db;
   const conn = db ?? (await openDb({ connectionString: dbPath }));
   const startedAt = new Date().toISOString();
+
+  // Be a good citizen: robots.txt + per-host rate limits, configured in sources.json.
+  const politeness = loadPoliteness();
+  configurePoliteness(politeness);
+  configureThrottle({ maxRequests: politeness.maxRequestsPerSync ?? POLITENESS.maxRequestsPerSync });
 
   const errors = [];
   const portalsRun = [];
@@ -116,7 +123,11 @@ export async function runSync({ db, dbPath, log = console.log, scrapers = buildS
       }
     }
 
+    const http = throttleReport();
+    log(`  http: ${http.requests} requests across ${http.hosts} hosts in ${http.seconds}s`);
+
     const counts = {
+      http_requests: http.requests,
       scraped: collected.length,
       per_portal: perPortal,
       unique: merged.length,

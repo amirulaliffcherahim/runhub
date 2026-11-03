@@ -57,6 +57,18 @@ export function parseDetail(html, slug, base = BASE) {
   if (reward) {
     entitlements.push({ kind: "prize_table", title: "Prizes", image_url: reward[1], notes: "" });
   }
+  // Content sections (route, goodies, sponsors) are opaque S3 images; label each with the
+  // nearest preceding <h3> so the drawer can group them.
+  for (const m of html.matchAll(/<h3>([\s\S]*?)<\/h3>([\s\S]{0,1500}?)jomrun-images-new\/event_section\/([^"]+)"/g)) {
+    const heading = stripHtml(m[1]).replace(/:$/, "");
+    entitlements.push({
+      kind: /route|map|course/i.test(heading) ? "route_map" : /goodie|entitle|pack|collect/i.test(heading) ? "goodies" : "section",
+      title: heading || "Race information",
+      image_url: `${S3}/event_section/${m[3]}`,
+      notes: "",
+    });
+  }
+
   // Named items from the ABOUT text are real entitlements (jersey, medal, cert...).
   for (const line of entitlementText.split(/\s*\d\.\s*/).slice(1)) {
     const item = stripHtml(line.replace(/\d+KM.*?Run/i, "")).trim();
