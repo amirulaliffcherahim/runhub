@@ -6,8 +6,10 @@
  *  - One portal failing never aborts the run. Failures land in `sync_runs.errors`.
  *  - Nothing is ever deleted. Events that pass their date (+ grace days) or vanish
  *    from a portal are archived: still in Postgres, hidden from the API/UI.
- *  - Events discovered by a different origin (e.g. the AI crawler) are not archived
- *    by a coded sync that simply did not look at those pages.
+ *  - An event is only archived as "delisted" when *every* portal that listed it ran
+ *    successfully this sync. A source that is disabled or failed therefore protects its
+ *    own events (e.g. AI-crawler events carry portal "ai"; if that source is off, they are
+ *    left alone). `events.origin` records who found an event first and is informational.
  */
 import { pathToFileURL } from "node:url";
 import { openDb, saveEvent, recordSyncRun, archiveExpired, archiveStale } from "./db.mjs";
