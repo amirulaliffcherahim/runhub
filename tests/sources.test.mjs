@@ -648,3 +648,46 @@ test("dedupe: a real two-portal race ends up with the union of both records", ()
   assert.equal(merged.race_pack[0].time, "10:00", "RPC time filled in");
   assert.equal(merged.sources.length, 2);
 });
+
+// ---------- Z2: canonical entitlement kinds ----------
+import { normaliseKind, KINDS } from "../scrapers/kinds.mjs";
+
+test("normaliseKind maps portal strings to the canonical vocabulary", () => {
+  const cases = {
+    sizing_chart: "size_chart",
+    size_chart: "size_chart",
+    timing_chip: "timing",
+    drawstring_bag: "goodies",
+    entitlement_table: "goodies",
+    route_map: "route_map",
+    event_tee: "event_tee",
+    finisher_tee: "finisher_tee",
+    medal: "medal",
+    fee_table: "fee_table",
+    prize_table: "prize_table",
+    section: "other",
+    poster: "other",
+    "": "other",
+    null: "other",
+  };
+  for (const [input, want] of Object.entries(cases)) {
+    assert.equal(normaliseKind(input), want, `${input} -> ${want}`);
+  }
+});
+
+test("normaliseKind falls back to the title when the kind is unhelpful", () => {
+  assert.equal(normaliseKind("section", "Route Map"), "route_map");
+  assert.equal(normaliseKind("other", "Size Chart (Unisex)"), "size_chart");
+  assert.equal(normaliseKind("section", "Finisher Tee 21KM only"), "finisher_tee");
+  assert.equal(normaliseKind("section", "Drifit Tee - Black"), "event_tee");
+  assert.equal(normaliseKind("section", "Finisher Medal"), "medal");
+  assert.equal(normaliseKind("section", "Registration Fee"), "fee_table");
+  assert.equal(normaliseKind("section", "Flag Off Time & Cut Off Time"), "timing");
+  assert.equal(normaliseKind("section", "Race Pack Collection"), "goodies");
+  assert.equal(normaliseKind("section", "Official Partner"), "other");
+});
+
+test("every canonical kind is reachable and the list has no duplicates", () => {
+  assert.equal(new Set(KINDS).size, KINDS.length);
+  for (const k of KINDS) assert.equal(normaliseKind(k), k, `${k} maps to itself`);
+});

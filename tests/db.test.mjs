@@ -233,3 +233,61 @@ test("dedupe tolerates duplicate rows within one portal", () => {
   const b = sampleEvent({ id: "y", title: "Same Race 2026", state: "KL", start_date: "2026-03-02" });
   assert.equal(dedupe([a, b]).length, 1, "dates within 1 day are the same event");
 });
+
+// ---------- Z2: new spec columns + canonical entitlement kinds ----------
+test("category specs (min_age, finisher_tee, early_bird_ends) round-trip", { skip }, async () => {
+  await saveEvent(db(), sampleEvent({
+    id: "spec-2026",
+    sources: [{ portal: "howei", source_url: "https://howei.com/event_details/spec" }],
+    route_map_url: "https://howei/route.jpg",
+    categories: [
+      { distance_km: 21, label: "21km", price_normal: 120, min_age: 18, finisher_tee: true, early_bird_ends: "2026-03-01" },
+      { distance_km: 5, label: "5km", price_normal: 50, min_age: 7, finisher_tee: false, early_bird_ends: null },
+    ],
+  }));
+  const ev = await getEvent(db(), "spec-2026");
+  assert.equal(ev.route_map_url, "https://howei/route.jpg");
+  const byKm = Object.fromEntries(ev.categories.map((c) => [c.distance_km, c]));
+  assert.equal(byKm[21].min_age, 18);
+  assert.equal(byKm[21].finisher_tee, true);
+  assert.equal(byKm[21].early_bird_ends, "2026-03-01");
+  assert.equal(byKm[5].finisher_tee, false);
+  assert.equal(byKm[5].early_bird_ends, null);
+});
+
+test("entitlement kinds are stored canonically", { skip }, async () => {
+  await saveEvent(db(), sampleEvent({
+    id: "kinds-2026",
+    sources: [{ portal: "racexasia", source_url: "https://racexasia.com/event/kinds" }],
+    entitlements: [
+      { kind: "sizing_chart", title: "Size Chart", image_url: "https://x/size.jpg" },
+      { kind: "timing_chip", title: "Flag Off Time", image_url: "https://x/flag.jpg" },
+      { kind: "drawstring_bag", title: "Entitlements", image_url: "https://x/bag.jpg" },
+      { kind: "section", title: "Route Map", image_url: "https://x/route.jpg" },
+      { kind: "unknown_thing", title: "Finisher Tee", image_url: "https://x/tee.jpg" },
+    ],
+  }));
+  const ev = await getEvent(db(), "kinds-2026");
+  assert.deepEqual(ev.entitlements.map((e) => e.kind), ["size_chart", "timing", "goodies", "route_map", "finisher_tee"]);
+});
+
+test("legacy entitlement kinds are backfilled on open, using the title", { skip }, async () => {
+  // Simulate rows written before the canonical vocabulary.
+  await saveEvent(db(), sampleEvent({
+    id: "legacy-2026",
+    sources: [{ portal: "racexasia", source_url: "https://racexasia.com/event/legacy" }],
+    entitlements: [{ kind: "medal", title: "Finisher Medal", image_url: "https://x/m.jpg" }],
+  }));
+  await db().query("UPDATE entitlements SET kind='section' WHERE event_id='legacy-2026'");
+  await db().query("UPDATE entitlements SET title='Route Map' WHERE event_id='legacy-2026'");
+
+  const { backfillKinds } = await import("../db.mjs");
+  const res = await backfillKinds(db());
+  assert.ok(res.changed >= 1, "the legacy row was re-labelled");
+  const ev = await getEvent(db(), "legacy-2026");
+  assert.equal(ev.entitlements[0].kind, "route_map", "section + 'Route Map' becomes route_map");
+
+  // Idempotent: a second pass finds nothing left to change.
+  const again = await backfillKinds(db());
+  assert.equal(again.changed, 0);
+});

@@ -13,6 +13,7 @@
  */
 import pg from "pg";
 import { readFileSync } from "node:fs";
+import { normaliseKind } from "./scrapers/kinds.mjs";
 
 const { Pool } = pg;
 
@@ -53,6 +54,7 @@ CREATE TABLE IF NOT EXISTS events (
   race_pack             TEXT,
   key_dates             TEXT,
   registration_deadline TEXT,
+  route_map_url         TEXT,
   origin                TEXT,
   first_seen_at         TEXT,
   updated_at            TEXT,
@@ -78,7 +80,10 @@ CREATE TABLE IF NOT EXISTS categories (
   price_note    TEXT,
   cutoff_time   TEXT,
   flag_off_time TEXT,
-  status        TEXT
+  status        TEXT,
+  min_age       INTEGER,
+  finisher_tee  BOOLEAN,
+  early_bird_ends TEXT
 );
 
 CREATE TABLE IF NOT EXISTS entitlements (
@@ -134,6 +139,7 @@ const MIGRATIONS = [
   ["race_pack", "TEXT"],
   ["key_dates", "TEXT"],
   ["registration_deadline", "TEXT"],
+  ["route_map_url", "TEXT"],
   ["origin", "TEXT"],
   ["last_seen_at", "TEXT"],
   ["archived_at", "TEXT"],
@@ -174,7 +180,35 @@ export async function openDb({ connectionString = process.env.DATABASE_URL, sche
   }
   // Columns added to other tables after their first release.
   await pool.query("ALTER TABLE sync_runs ADD COLUMN IF NOT EXISTS status TEXT");
+  await pool.query("ALTER TABLE categories ADD COLUMN IF NOT EXISTS min_age INTEGER");
+  await pool.query("ALTER TABLE categories ADD COLUMN IF NOT EXISTS finisher_tee BOOLEAN");
+  await pool.query("ALTER TABLE categories ADD COLUMN IF NOT EXISTS early_bird_ends TEXT");
+  await backfillKinds(pool);
   return db;
+}
+
+/** Legacy kind values written before the canonical vocabulary existed. */
+const LEGACY_KINDS = ["sizing_chart", "timing_chip", "drawstring_bag", "entitlement_table", "section", "poster"];
+
+/**
+ * Re-label entitlements written with a legacy kind. Uses the title, because that is
+ * often where the real kind is stated ("section" + "Route Map" -> route_map).
+ * Idempotent: after the first pass no rows match LEGACY_KINDS.
+ */
+export async function backfillKinds(conn) {
+  const { rows } = await conn.query(
+    `SELECT id, kind, title FROM entitlements WHERE kind = ANY($1)`,
+    [LEGACY_KINDS]
+  );
+  let changed = 0;
+  for (const r of rows) {
+    const kind = normaliseKind(r.kind, r.title);
+    if (kind !== r.kind) {
+      await conn.query("UPDATE entitlements SET kind = $1 WHERE id = $2", [kind, r.id]);
+      changed++;
+    }
+  }
+  return { scanned: rows.length, changed };
 }
 
 const parseJson = (v) => {
@@ -257,8 +291,8 @@ async function saveEventInner(client, event) {
     await client.query(
       `INSERT INTO events (id, title, organizer, start_date, end_date, state, venue,
           description, status, banner_url, first_seen_at, updated_at,
-          race_pack, key_dates, registration_deadline, origin, last_seen_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+          race_pack, key_dates, registration_deadline, route_map_url, origin, last_seen_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
        ON CONFLICT (id) DO UPDATE SET
          title=EXCLUDED.title, organizer=EXCLUDED.organizer,
          start_date=EXCLUDED.start_date, end_date=EXCLUDED.end_date,
@@ -267,6 +301,7 @@ async function saveEventInner(client, event) {
          banner_url=EXCLUDED.banner_url, updated_at=EXCLUDED.updated_at,
          race_pack=EXCLUDED.race_pack, key_dates=EXCLUDED.key_dates,
          registration_deadline=EXCLUDED.registration_deadline,
+         route_map_url=COALESCE(EXCLUDED.route_map_url, events.route_map_url),
          origin=COALESCE(events.origin, EXCLUDED.origin),
          last_seen_at=EXCLUDED.last_seen_at,
          archived_at=NULL, archived_reason=NULL`,
@@ -286,6 +321,7 @@ async function saveEventInner(client, event) {
         event.race_pack?.length ? JSON.stringify(event.race_pack) : null,
         event.key_dates?.length ? JSON.stringify(event.key_dates) : null,
         event.registration_deadline ?? null,
+        event.route_map_url ?? null,
         event.origin ?? null,
         ts,
       ]
@@ -295,8 +331,8 @@ async function saveEventInner(client, event) {
     for (const c of event.categories ?? []) {
       await client.query(
         `INSERT INTO categories (event_id, distance_km, label, price_early, price_normal,
-            price_note, cutoff_time, flag_off_time, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+            price_note, cutoff_time, flag_off_time, status, min_age, finisher_tee, early_bird_ends)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [
           id,
           c.distance_km ?? null,
@@ -307,6 +343,9 @@ async function saveEventInner(client, event) {
           c.cutoff_time ?? null,
           c.flag_off_time ?? null,
           c.status ?? null,
+          c.min_age ?? null,
+          c.finisher_tee ?? null,
+          c.early_bird_ends ?? null,
         ]
       );
     }
@@ -316,7 +355,8 @@ async function saveEventInner(client, event) {
       await client.query(
         `INSERT INTO entitlements (event_id, kind, title, image_url, notes)
          VALUES ($1,$2,$3,$4,$5)`,
-        [id, e.kind ?? null, e.title ?? null, e.image_url ?? null, e.notes ?? null]
+        // Store the canonical kind, so the UI can group images without portal-specific rules.
+        [id, normaliseKind(e.kind, e.title), e.title ?? null, e.image_url ?? null, e.notes ?? null]
       );
     }
 
