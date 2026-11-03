@@ -667,3 +667,97 @@ run 6 status ok | API polls during sync: 200, 200 | active events: 312 (unchange
 Tests: `tests/sync.test.mjs` covers all three guarantees -
 a mid-publish failure leaves the previous data untouched, a crashed run is still closed,
 and a scraper inspecting the DB mid-crawl still sees only the previous dataset.
+
+## 18. Zero-click-out release (Z1-Z9, 2026-11-03)
+
+Goal: every decision field lives in the hub, so the portal link is only for paying.
+
+### Z1 - field-level merge (`scrapers/normalizer.mjs`)
+`mergeInto` no longer keeps whichever portal had the longest array. It unions:
+- **categories** by distance (21 / 21.1 / 21.0975 are one bucket) *and* gender/age variant,
+  so "21km Men Open" and "21km Veteran" stay separate tiers. Blanks are filled from the
+  other portal; a conflicting price is kept from the richer portal and the other value is
+  recorded in `price_note` rather than dropped.
+- **entitlements** by kind + image URL (query string ignored), richer title wins.
+- **race_pack** by venue, **key_dates** by title.
+
+### Z2 - schema + one vocabulary
+New columns: `categories.min_age`, `categories.finisher_tee`, `categories.early_bird_ends`,
+`events.route_map_url` (all additive migrations). `scrapers/kinds.mjs` defines the only
+allowed entitlement kinds - `event_tee | finisher_tee | medal | size_chart | route_map |
+goodies | fee_table | prize_table | timing | other` - with a title fallback for portals that
+label images generically ("section" + "Route Map" -> `route_map`). `backfillKinds()` re-labels
+existing rows on boot; it is idempotent.
+
+### Z3 - extraction
+| Portal | Gained |
+|---|---|
+| BiiB | per-distance flag-off and cut-off ("21.1KM Competitive Run: 4:00am" / "4 hours"), registration close date, Size Chart images |
+| RaceXasia | `early_bird_ends` from KeyDate, `min_age` from the category label, `route_map_url` |
+| JomRun | finisher tee decided **per distance** from the ABOUT list, registration deadline as ISO, race-pack date/time/venue ("To Be Confirmed" -> null) |
+| Howei | category and flag tabs are images, so nothing structured exists (recorded, not guessed) |
+| Ticket2U / Lesgo / AI | date, venue, price only (unchanged) |
+
+### Z4 - image proxy: measured, not built
+40 sampled images, 19 loaded in a real browser: **0 broken**. JomRun's S3 returns
+`application/octet-stream`, which browsers render fine. No host blocked hotlinking, so
+`/api/image-proxy` would only have added SSRF surface. Design kept in `work.md` if needed.
+
+### Z5 - card density
+Distance chips carry the cheapest price for that distance (`21K RM120`), an
+"Early bird ends in Nd" badge appears only while the cut-off is in the future, and up to two
+kit thumbnails (tee first) render on the card.
+
+### Z6 - drawer v2
+- **Categories & pacing**: distance, early/normal price, flag-off, cut-off, the pace needed to
+  beat the cut-off, min age, finisher-tee marker, and your projected finish.
+- **Kit, size chart & route**: grouped by kind, click-to-zoom lightbox (Esc closes, drawer stays).
+- **Race pack & logistics**: registration close, RPC date/window/venue, Google Maps + Waze
+  deep links for both the RPC venue and the flag-off venue.
+- **Sticky checkout bar**: one button per selling portal with the cheapest price. Lesgo and AI
+  sources are labelled "Listing", never "Checkout".
+
+### Z7 - runner profile
+Single-row `profile` table (shirt size, chest, paces per distance) with `GET/PUT /api/profile`
+and validation (chest 40-200 cm, paces `m:ss`, numeric distance keys). The drawer projects your
+saved pace onto each category and colours it red when it misses the cut-off.
+
+### Z8 - clash detection (`clashes.mjs`)
+Pure rules: same race day always clashes; the recovery window is 2 days, 3 for a half and 7 for
+a marathon (longest of the two races); an RPC date landing on another race's day is flagged.
+`/api/events` annotates unsaved events so the card shows "Clashes with <race>" with the full
+reason list in the tooltip.
+
+### Z9 - measured coverage
+`npm run verify` now prints field coverage on active events. Baseline before the Z3 sync and the
+result after it are recorded below.
+
+**Tests: 157/157 passing.**
+
+### Measured coverage (active events, `npm run verify`)
+
+| Field | Before Z3 sync | After Z3 sync |
+|---|---|---|
+| priced | 30% | **35%** |
+| flag-off | 39% | **44%** |
+| cut-off | 0% | **1%** |
+| min age | 0% | **1%** |
+| finisher tee | 0% | **10%** |
+| early-bird end | 0% | **1%** |
+| size chart | 10% | **13%** |
+| route map | 4% | 4% |
+| registration close | 12% | **14%** |
+| race-pack info | 12% | **15%** |
+
+Every new field moved, but the absolute numbers are low - and that is a property of the
+sources, not of the parsers:
+
+- **cut-off (1%)**: only BiiB publishes it, and only 2 of its 33 events have a Participation
+  block at all. No other portal states a cut-off time anywhere on the page.
+- **min age / early-bird (1%)**: RaceXasia only, and only for events with a KeyDate table.
+- **finisher tee (10%)**: JomRun's ABOUT list is the only per-distance statement of it.
+- **flag-off (44%)**: mostly JomRun's single event-level time and Howei's `fa-clock` field,
+  which apply to all distances rather than one.
+
+Closing the gap further needs sources that publish the data, not better regexes. That is
+recorded in `work.md`.

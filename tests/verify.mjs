@@ -112,49 +112,91 @@ if (db) {
   const stats = await dbStats(db);
   const total = stats.total;
 
-  check("events exist", () => {
+  await check("events exist", () => {
     expect(total > 0, "empty DB");
     return `${stats.active} active, ${stats.archived} archived`;
   });
 
-  check("every event has a date (AC-05)", async () => {
+  await check("every event has a date (AC-05)", async () => {
     const n = (await one("SELECT count(*)::int c FROM events WHERE start_date IS NULL")).c;
     expect(n === 0, `${n} events without start_date`);
     return "0 undated";
   });
 
-  check("every event has at least one source (AC-05)", async () => {
+  await check("every event has at least one source (AC-05)", async () => {
     const n = (await one("SELECT count(*)::int c FROM events e WHERE NOT EXISTS (SELECT 1 FROM event_sources s WHERE s.event_id = e.id)")).c;
     expect(n === 0, `${n} events without a source`);
     return "all sourced";
   });
 
-  check("state coverage on active events", async () => {
+  // Field coverage for the zero-click-out release: how much of the decision data we hold.
+  const pctOf = (n, d) => (d ? Math.round((n / d) * 100) : 0);
+  await check("field coverage (active events)", async () => {
+    const r = await one(`
+      SELECT
+        (SELECT count(*)::int FROM events WHERE archived_at IS NULL) AS events,
+        (SELECT count(DISTINCT e.id)::int FROM events e JOIN categories c ON c.event_id = e.id
+          WHERE e.archived_at IS NULL AND c.price_normal IS NOT NULL) AS priced,
+        (SELECT count(DISTINCT e.id)::int FROM events e JOIN categories c ON c.event_id = e.id
+          WHERE e.archived_at IS NULL AND c.flag_off_time IS NOT NULL) AS flagoff,
+        (SELECT count(DISTINCT e.id)::int FROM events e JOIN categories c ON c.event_id = e.id
+          WHERE e.archived_at IS NULL AND c.cutoff_time IS NOT NULL) AS cutoff,
+        (SELECT count(DISTINCT e.id)::int FROM events e JOIN categories c ON c.event_id = e.id
+          WHERE e.archived_at IS NULL AND c.min_age IS NOT NULL) AS minage,
+        (SELECT count(DISTINCT e.id)::int FROM events e JOIN categories c ON c.event_id = e.id
+          WHERE e.archived_at IS NULL AND c.finisher_tee IS NOT NULL) AS finishertee,
+        (SELECT count(DISTINCT e.id)::int FROM events e JOIN categories c ON c.event_id = e.id
+          WHERE e.archived_at IS NULL AND c.early_bird_ends IS NOT NULL) AS earlybird,
+        (SELECT count(DISTINCT e.id)::int FROM events e JOIN entitlements t ON t.event_id = e.id
+          WHERE e.archived_at IS NULL AND t.kind = 'size_chart') AS sizechart,
+        (SELECT count(DISTINCT e.id)::int FROM events e JOIN entitlements t ON t.event_id = e.id
+          WHERE e.archived_at IS NULL AND t.kind = 'route_map') AS routemap,
+        (SELECT count(DISTINCT e.id)::int FROM events e
+          WHERE e.archived_at IS NULL AND e.registration_deadline IS NOT NULL) AS regclose,
+        (SELECT count(DISTINCT e.id)::int FROM events e
+          WHERE e.archived_at IS NULL AND e.race_pack IS NOT NULL AND e.race_pack <> '[]') AS rpc
+    `);
+    const n = r.events;
+    return [
+      `priced ${pctOf(r.priced, n)}%`,
+      `flag-off ${pctOf(r.flagoff, n)}%`,
+      `cut-off ${pctOf(r.cutoff, n)}%`,
+      `min-age ${pctOf(r.minage, n)}%`,
+      `finisher-tee ${pctOf(r.finishertee, n)}%`,
+      `early-bird ${pctOf(r.earlybird, n)}%`,
+      `size-chart ${pctOf(r.sizechart, n)}%`,
+      `route-map ${pctOf(r.routemap, n)}%`,
+      `reg-close ${pctOf(r.regclose, n)}%`,
+      `rpc ${pctOf(r.rpc, n)}%`,
+    ].join(" · ");
+  });
+
+  await check("state coverage on active events", async () => {
     const r = await one("SELECT count(*)::int total, count(*) FILTER (WHERE state IS NULL)::int missing FROM events WHERE archived_at IS NULL");
     const pct = Math.round(((r.total - r.missing) / r.total) * 100);
     expect(pct >= 70, `only ${pct}% of active events have a state`);
     return `${pct}% (${r.total - r.missing}/${r.total})`;
   });
 
-  check("no non-running listings", async () => {
+  await check("no non-running listings", async () => {
     const bad = (await db.query("SELECT title FROM events WHERE title ILIKE '%badminton%' OR title ILIKE '%zumba%' OR title ILIKE '%seminar%'")).rows;
     expect(bad.length === 0, `found: ${bad.map((b) => b.title).join(", ")}`);
     return "clean";
   });
 
-  check("archived events are kept, not deleted", async () => {
+  await check("archived events are kept, not deleted", async () => {
     const r = await one("SELECT count(*)::int c FROM events WHERE archived_at IS NOT NULL");
     const orphans = (await one("SELECT count(*)::int c FROM events e WHERE archived_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM event_sources s WHERE s.event_id = e.id)")).c;
     expect(orphans === 0, `${orphans} archived events lost their sources`);
     return `${r.c} archived, all with sources`;
   });
 
-  check("sold-out / closed upcoming events are retained", async () => {
+  await check("sold-out / closed upcoming events are retained", async () => {
     const r = await one("SELECT count(*)::int c FROM events WHERE archived_at IS NULL AND status IN ('sold_out','closed')");
     return `${r.c} kept`;
   });
 
-  check("latest sync run recorded (AC-01)", async () => {
+  await check("latest sync run recorded (AC-01)", async () => {
     const run = await one("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1");
     expect(run, "no sync_runs row");
     expect(run.started_at && run.finished_at, "run has no timestamps");
