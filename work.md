@@ -80,3 +80,13 @@ This file tracks what is left. Order = priority.
 - Deployed under pm2 as `runhub`, bound to the Tailscale IP only.
 - Daily sync via cron on itsmini (the Windows task covers the dev box only).
 - See "Deploy" notes in `README.md`.
+
+## Z4 image proxy - measured, not built
+Sampled 40 entitlement images from the live DB and loaded 19 of them in a real browser:
+**0 broken**. JomRun's S3 bucket returns `application/octet-stream` instead of `image/*`,
+but browsers sniff and render it fine (27 "failures" in a naive content-type check were
+false positives). No host sent 403, so there is no Referer block to work around.
+Decision: do not add `/api/image-proxy` - it would only add SSRF surface. If a host ever
+starts blocking, the design is: allowlist of image hosts, no redirects off-allowlist,
+http(s) only, reject private/loopback IPs, image/* content-type required, 5 MB cap,
+cached with ETag.
