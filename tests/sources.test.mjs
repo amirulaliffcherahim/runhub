@@ -513,3 +513,138 @@ test("throttle: refuses once the request budget is spent", async () => {
   await assert.rejects(schedule("https://a.example/3", 0, async () => {}), /budget exhausted/);
   resetThrottle();
 });
+
+// ---------- Z1: field-level merge across portals ----------
+import { mergeCategories, mergeEntitlements, mergeRacePack, mergeKeyDates } from "../scrapers/normalizer.mjs";
+
+const cat = (over = {}) => ({
+  distance_km: 21, label: "21km", price_early: null, price_normal: null,
+  price_note: null, cutoff_time: null, flag_off_time: null, status: "open", ...over,
+});
+
+test("mergeCategories matches the same tier across portal spellings (21.0975 == 21.1)", () => {
+  const out = mergeCategories(
+    [cat({ distance_km: 21.0975, label: "Half Marathon", price_normal: 120 })],
+    [cat({ distance_km: 21.1, label: "21.1KM Competitive Run", flag_off_time: "4:00am" })]
+  );
+  assert.equal(out.length, 1, "one row, not two");
+  assert.equal(out[0].price_normal, 120, "price kept from the first portal");
+  assert.equal(out[0].flag_off_time, "4:00am", "flag-off filled from the second");
+  assert.equal(out[0].label, "21.1KM Competitive Run", "the more informative label wins");
+});
+
+test("mergeCategories keeps tiers that only one portal lists", () => {
+  const out = mergeCategories(
+    [cat({ distance_km: 42, label: "Full" }), cat({ distance_km: 21 })],
+    [cat({ distance_km: 5, label: "5km Fun Run" })]
+  );
+  assert.deepEqual(out.map((c) => c.distance_km), [5, 21, 42], "sorted, no duplicates, nothing dropped");
+});
+
+test("mergeCategories never overwrites a value with null, and fills every spec field", () => {
+  const out = mergeCategories(
+    [cat({ price_early: 90, price_normal: 120, cutoff_time: "6 hours", min_age: 18 })],
+    [cat({ price_early: null, price_normal: null, cutoff_time: null, flag_off_time: "5:00am", finisher_tee: true, min_age: null })]
+  );
+  assert.equal(out[0].price_early, 90);
+  assert.equal(out[0].price_normal, 120);
+  assert.equal(out[0].cutoff_time, "6 hours");
+  assert.equal(out[0].min_age, 18);
+  assert.equal(out[0].flag_off_time, "5:00am");
+  assert.equal(out[0].finisher_tee, true);
+});
+
+test("mergeCategories records a conflicting price instead of silently dropping it", () => {
+  const out = mergeCategories([cat({ price_normal: 120 })], [cat({ price_normal: 135 })]);
+  assert.equal(out[0].price_normal, 120, "richer portal's price wins");
+  assert.match(out[0].price_note, /other portal lists normal RM135/);
+});
+
+test("mergeCategories falls back to the label when a portal gives no distance", () => {
+  const out = mergeCategories(
+    [cat({ distance_km: null, label: "Fun Run", price_normal: 40 })],
+    [cat({ distance_km: null, label: "Fun Run", flag_off_time: "7:00am" })]
+  );
+  assert.equal(out.length, 1);
+  assert.equal(out[0].flag_off_time, "7:00am");
+});
+
+test("mergeEntitlements unions by image so prices and kit photos both survive", () => {
+  const out = mergeEntitlements(
+    [
+      { kind: "fee_table", title: "Registration Fee", image_url: "https://rx/fee.jpg" },
+      { kind: "event_tee", title: "Event Tee", image_url: "https://rx/tee.jpg" },
+    ],
+    [
+      { kind: "event_tee", title: "Drifit Tee - Black", image_url: "https://howei/tee.jpg" },
+      { kind: "medal", title: "Finisher Medal", image_url: "https://howei/medal.jpg" },
+      { kind: "size_chart", title: "Size Chart", image_url: "https://howei/size.jpg" },
+    ]
+  );
+  assert.equal(out.length, 5, "nothing dropped");
+  assert.deepEqual(out.map((e) => e.kind).sort(), ["event_tee", "event_tee", "fee_table", "medal", "size_chart"]);
+});
+
+test("mergeEntitlements dedupes the same asset with a cache-busting query string", () => {
+  const out = mergeEntitlements(
+    [{ kind: "medal", title: "Medal", image_url: "https://x/medal.jpg" }],
+    [{ kind: "medal", title: "Finisher Medal", image_url: "https://x/medal.jpg?v=2" }]
+  );
+  assert.equal(out.length, 1);
+  assert.equal(out[0].title, "Finisher Medal", "the richer title wins");
+});
+
+test("mergeEntitlements keeps a titled image over an untitled duplicate", () => {
+  const out = mergeEntitlements(
+    [{ kind: "event_tee", title: null, image_url: "https://x/a.jpg" }],
+    [{ kind: "event_tee", title: "Collared Shirt - White", image_url: "https://x/a.jpg" }]
+  );
+  assert.equal(out.length, 1);
+  assert.equal(out[0].title, "Collared Shirt - White");
+});
+
+test("mergeRacePack and mergeKeyDates union by venue/title", () => {
+  const pack = mergeRacePack(
+    [{ date: "2026-07-30", time: null, venue: "Mid Valley" }],
+    [{ date: null, time: "10:00", venue: "Mid Valley" }, { date: "2026-07-31", time: null, venue: "Penang" }]
+  );
+  assert.equal(pack.length, 2);
+  assert.equal(pack[0].time, "10:00", "time filled from the other portal");
+  assert.equal(pack[1].venue, "Penang");
+
+  const keys = mergeKeyDates(
+    [{ date: null, title: "Early Bird" }],
+    [{ date: "2026-03-01", title: "Early Bird" }, { date: "2026-06-01", title: "Normal" }]
+  );
+  assert.equal(keys.length, 2);
+  assert.equal(keys[0].date, "2026-03-01");
+});
+
+test("dedupe: a real two-portal race ends up with the union of both records", () => {
+  const racexasia = mk("rx", "Kuala Kangsar Half Marathon 2027", "racexasia", "https://racexasia.com/event/kkhm", {
+    start_date: "2027-05-02", state: "Perak",
+    categories: [cat({ distance_km: 21, label: "21km", price_early: 80, price_normal: 95 })],
+    entitlements: [{ kind: "fee_table", title: "Registration Fee", image_url: "https://rx/fee.jpg" }],
+    race_pack: [{ date: "2027-04-30", venue: "Ipoh" }],
+  });
+  const howei = mk("hw", "Kuala Kangsar Half Marathon 2027", "howei", "https://howei.com/event_details/kkhm", {
+    start_date: "2027-05-02", state: "Perak",
+    categories: [cat({ distance_km: 21, label: "21km", flag_off_time: "5:00am", cutoff_time: "6 hours" })],
+    entitlements: [
+      { kind: "event_tee", title: "Drifit Tee - Black", image_url: "https://howei/tee.jpg" },
+      { kind: "size_chart", title: "Size Chart", image_url: "https://howei/size.jpg" },
+    ],
+    race_pack: [{ date: null, time: "10:00", venue: "Ipoh" }],
+  });
+
+  const out = dedupe([racexasia, howei]);
+  assert.equal(out.length, 1);
+  const merged = out[0];
+  assert.equal(merged.categories.length, 1, "one 21km row");
+  assert.equal(merged.categories[0].price_normal, 95, "RaceXasia price");
+  assert.equal(merged.categories[0].flag_off_time, "5:00am", "Howei flag-off");
+  assert.equal(merged.categories[0].cutoff_time, "6 hours", "Howei cut-off");
+  assert.equal(merged.entitlements.length, 3, "fee table + tee + size chart");
+  assert.equal(merged.race_pack[0].time, "10:00", "RPC time filled in");
+  assert.equal(merged.sources.length, 2);
+});

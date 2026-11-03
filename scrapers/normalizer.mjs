@@ -57,17 +57,98 @@ const score = (ev) =>
   (ev.start_date ? 10 : 0) +
   (ev.state ? 5 : 0);
 
+const isBlank = (v) => v === null || v === undefined || v === "";
+
+/** Fill `target`'s blanks from `source`. Never overwrites a value with null. */
+function fillBlanks(target, source, fields) {
+  for (const f of fields) if (isBlank(target[f]) && !isBlank(source[f])) target[f] = source[f];
+}
+
+/**
+ * Category identity: the distance, not the label.
+ * Portals spell the same tier "21km", "21.1KM Competitive Run" or "Half Marathon",
+ * so 21.0975 and 21.1 must land on the same row.
+ */
+function categoryKey(c) {
+  if (c.distance_km == null) return `label:${String(c.label ?? "").toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+  return `km:${Math.round(Number(c.distance_km) * 10) / 10}`;
+}
+
+/** Image identity: the same asset often appears with a cache-busting query string. */
+function imageKey(e) {
+  const url = String(e.image_url ?? "").split("?")[0].replace(/\/+$/, "").toLowerCase();
+  return url || `title:${String(e.title ?? "").toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+}
+
+const CATEGORY_FIELDS = ["price_early", "price_normal", "price_note", "cutoff_time", "flag_off_time", "status", "min_age", "finisher_tee", "early_bird_ends"];
+
+/**
+ * Union categories by distance. The base row keeps its own values; blanks are filled
+ * from the other portal. A *conflicting* price is not silently dropped: the base value
+ * wins and the other is recorded in `price_note` so the UI can show both.
+ */
+export function mergeCategories(base = [], incoming = []) {
+  const out = base.map((c) => ({ ...c }));
+  const byKey = new Map(out.map((c) => [categoryKey(c), c]));
+
+  for (const c of incoming) {
+    const key = categoryKey(c);
+    const hit = byKey.get(key);
+    if (!hit) {
+      const copy = { ...c };
+      out.push(copy);
+      byKey.set(key, copy);
+      continue;
+    }
+    for (const f of ["price_early", "price_normal"]) {
+      if (!isBlank(hit[f]) && !isBlank(c[f]) && Number(hit[f]) !== Number(c[f])) {
+        const note = `other portal lists ${f === "price_normal" ? "normal" : "early"} RM${Number(c[f]).toFixed(2).replace(/\.00$/, "")}`;
+        if (!String(hit.price_note ?? "").includes(note)) {
+          hit.price_note = [hit.price_note, note].filter(Boolean).join("; ");
+        }
+      }
+    }
+    fillBlanks(hit, c, CATEGORY_FIELDS);
+    // A longer label is usually the more informative one ("A: 21km Men Open (17yrs+)").
+    if ((c.label?.length ?? 0) > (hit.label?.length ?? 0)) hit.label = c.label;
+  }
+
+  return out.sort((a, b) => (a.distance_km ?? 999) - (b.distance_km ?? 999));
+}
+
+/** Union entitlements by kind + image, so RaceXasia's prices and Howei's tee photos both survive. */
+export function mergeEntitlements(base = [], incoming = []) {
+  const out = base.map((e) => ({ ...e }));
+  const byKey = new Map(out.map((e) => [imageKey(e), e]));
+
+  for (const e of incoming) {
+    const key = imageKey(e);
+    const hit = byKey.get(key);
+    if (!hit) {
+      const copy = { ...e };
+      out.push(copy);
+      byKey.set(key, copy);
+      continue;
+    }
+    fillBlanks(hit, e, ["kind", "title", "notes"]);
+    if ((e.title?.length ?? 0) > (hit.title?.length ?? 0)) hit.title = e.title;
+  }
+
+  return out;
+}
+
 function mergeInto(base, incoming) {
-  // Fill blanks on base; keep base's denser children.
-  for (const field of ["start_date", "end_date", "state", "venue", "description", "banner_url"]) {
-    if (!base[field] && incoming[field]) base[field] = incoming[field];
-  }
-  if ((incoming.categories?.length ?? 0) > (base.categories?.length ?? 0)) {
-    base.categories = incoming.categories;
-  }
-  if ((incoming.entitlements?.length ?? 0) > (base.entitlements?.length ?? 0)) {
-    base.entitlements = incoming.entitlements;
-  }
+  // Scalar fields: fill blanks only, so a richer portal's values are never lost.
+  fillBlanks(base, incoming, [
+    "start_date", "end_date", "state", "venue", "description", "banner_url",
+    "organizer", "registration_deadline", "route_map_url",
+  ]);
+
+  base.categories = mergeCategories(base.categories ?? [], incoming.categories ?? []);
+  base.entitlements = mergeEntitlements(base.entitlements ?? [], incoming.entitlements ?? []);
+  base.race_pack = mergeRacePack(base.race_pack ?? [], incoming.race_pack ?? []);
+  base.key_dates = mergeKeyDates(base.key_dates ?? [], incoming.key_dates ?? []);
+
   const seen = new Set(base.sources.map((s) => `${s.portal}|${s.source_url}`));
   for (const s of incoming.sources ?? []) {
     const key = `${s.portal}|${s.source_url}`;
@@ -77,6 +158,44 @@ function mergeInto(base, incoming) {
     }
   }
   return base;
+}
+
+/** Race-pack collection points: union by venue, filling a missing date/time. */
+export function mergeRacePack(base = [], incoming = []) {
+  const key = (r) => String(r.venue ?? "").toLowerCase().replace(/[^a-z0-9]/g, "") || String(r.date ?? "");
+  const out = base.map((r) => ({ ...r }));
+  const byKey = new Map(out.map((r) => [key(r), r]));
+  for (const r of incoming) {
+    const k = key(r);
+    const hit = byKey.get(k);
+    if (!hit) {
+      const copy = { ...r };
+      out.push(copy);
+      byKey.set(k, copy);
+      continue;
+    }
+    fillBlanks(hit, r, ["date", "time", "venue"]);
+  }
+  return out;
+}
+
+/** Key dates: union by title, filling a missing date. */
+export function mergeKeyDates(base = [], incoming = []) {
+  const key = (k) => String(k.title ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const out = base.map((k) => ({ ...k }));
+  const byKey = new Map(out.map((k) => [key(k), k]));
+  for (const k of incoming) {
+    const kk = key(k);
+    const hit = byKey.get(kk);
+    if (!hit) {
+      const copy = { ...k };
+      out.push(copy);
+      byKey.set(kk, copy);
+      continue;
+    }
+    fillBlanks(hit, k, ["date", "title"]);
+  }
+  return out;
 }
 
 /**
