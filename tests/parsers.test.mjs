@@ -175,3 +175,21 @@ test("ticket2u: listing JSON maps to events with date, state and price", () => {
   assert.ok(priced.length > 0 && priced[0].categories[0].price_normal > 0);
 });
 
+
+// ---------- Z3: BiiB logistics ----------
+test("biib: per-distance flag-off and cut-off times from the Participation block", () => {
+  const e = biibDetail(fx("biib-detail.html"), "1792");
+  const byKm = Object.fromEntries(e.categories.map((c) => [c.distance_km, c]));
+  assert.equal(byKm[21.1].flag_off_time, "4:00am");
+  assert.equal(byKm[21.1].cutoff_time, "4 hours");
+  assert.equal(byKm[10].flag_off_time, "6:00am");
+  assert.equal(byKm[5].cutoff_time, "1 hour");
+});
+
+test("biib: registration close date and size-chart images", () => {
+  const e = biibDetail(fx("biib-detail.html"), "1792");
+  assert.equal(e.registration_deadline, "2027-03-08");
+  assert.ok(e.entitlements.length >= 1, "size chart images captured");
+  assert.ok(e.entitlements.every((x) => x.kind === "size_chart"));
+  assert.ok(e.entitlements.every((x) => x.image_url.startsWith("https://")));
+});

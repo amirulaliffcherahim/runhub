@@ -69,9 +69,28 @@ function fillBlanks(target, source, fields) {
  * Portals spell the same tier "21km", "21.1KM Competitive Run" or "Half Marathon",
  * so 21.0975 and 21.1 must land on the same row.
  */
-function categoryKey(c) {
+function distanceKey(c) {
   if (c.distance_km == null) return `label:${String(c.label ?? "").toLowerCase().replace(/[^a-z0-9]/g, "")}`;
-  return `km:${Math.round(Number(c.distance_km) * 10) / 10}`;
+  const d = Number(c.distance_km);
+  // 21.0975, 21.1 and 21 are the same tier. Anything within 0.25 km of a whole
+  // number is bucketed to it; other values keep one decimal.
+  const whole = Math.round(d);
+  return Math.abs(d - whole) <= 0.25 ? `km:${whole}` : `km:${d.toFixed(1)}`;
+}
+
+/**
+ * Gender/age discriminator. One distance often has several real categories
+ * ("21km Men Open (17yrs+)" and "21km Veteran (40yrs+)"), and collapsing them would
+ * lose a price tier, so the tag is part of the identity.
+ */
+function tierTag(label) {
+  const l = String(label ?? "").toLowerCase();
+  const tags = [];
+  if (/\b(men|male|lelaki|putra)\b/.test(l)) tags.push("m");
+  if (/\b(women|female|wanita|ladies|putri)\b/.test(l)) tags.push("f");
+  if (/\b(veteran|senior|master)\b/.test(l)) tags.push("v");
+  if (/\b(junior|kids?|child|boy|girl)\b/.test(l)) tags.push("j");
+  return tags.sort().join("+");
 }
 
 /** Image identity: the same asset often appears with a cache-busting query string. */
@@ -89,17 +108,35 @@ const CATEGORY_FIELDS = ["price_early", "price_normal", "price_note", "cutoff_ti
  */
 export function mergeCategories(base = [], incoming = []) {
   const out = base.map((c) => ({ ...c }));
-  const byKey = new Map(out.map((c) => [categoryKey(c), c]));
+  const byDistance = new Map();
+  const remember = (c) => {
+    const k = distanceKey(c);
+    if (!byDistance.has(k)) byDistance.set(k, []);
+    byDistance.get(k).push(c);
+  };
+  out.forEach(remember);
 
   for (const c of incoming) {
-    const key = categoryKey(c);
-    const hit = byKey.get(key);
+    const key = distanceKey(c);
+    const candidates = byDistance.get(key) ?? [];
+    const tag = tierTag(c.label);
+
+    // Same distance + same gender/age tag is the same tier. A portal that lists only
+    // one generic tier ("21.1KM Competitive Run") may absorb the first tagged variant,
+    // but never a second one - that would lose a real category.
+    let hit = candidates.find((x) => x.__tag === tag);
+    if (!hit && candidates.length) {
+      const free = candidates.find((x) => x.__tag === undefined);
+      if (free) hit = free;
+    }
+
     if (!hit) {
-      const copy = { ...c };
+      const copy = { ...c, __tag: tag };
       out.push(copy);
-      byKey.set(key, copy);
+      remember(copy);
       continue;
     }
+    hit.__tag = tag;
     for (const f of ["price_early", "price_normal"]) {
       if (!isBlank(hit[f]) && !isBlank(c[f]) && Number(hit[f]) !== Number(c[f])) {
         const note = `other portal lists ${f === "price_normal" ? "normal" : "early"} RM${Number(c[f]).toFixed(2).replace(/\.00$/, "")}`;
@@ -113,7 +150,9 @@ export function mergeCategories(base = [], incoming = []) {
     if ((c.label?.length ?? 0) > (hit.label?.length ?? 0)) hit.label = c.label;
   }
 
-  return out.sort((a, b) => (a.distance_km ?? 999) - (b.distance_km ?? 999));
+  return out
+    .map(({ __tag, ...rest }) => rest)
+    .sort((a, b) => (a.distance_km ?? 999) - (b.distance_km ?? 999));
 }
 
 /** Union entitlements by kind + image, so RaceXasia's prices and Howei's tee photos both survive. */

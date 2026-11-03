@@ -38,19 +38,32 @@ export function parseDetail(html, slug, base = BASE) {
   const d = dump.EventDetail ?? {};
   const info = dump.Info ?? {};
 
+  const keyDates = (dump.KeyDate ?? []).map((k) => ({ date: k.date, title: stripHtml(k.title) }));
+
+  // "Early Bird Ends" is when the discounted price stops. Fall back to the super-early date.
+  const earlyBirdEnds =
+    keyDates.find((k) => /^early bird ends/i.test(k.title))?.date ??
+    keyDates.find((k) => /early bird ends/i.test(k.title))?.date ??
+    null;
+
   const categories = (dump.Category ?? []).map((c) => {
     const prices = c.prices ?? [];
     const normal = prices.find((p) => /normal/i.test(p.label));
     const early = prices.find((p) => /early bird/i.test(p.label));
+    const label = stripHtml(c.name);
+    // "A: 21km Men Open (17yrs and above)" -> 17
+    const age = label.match(/\((\d{1,2})\s*(?:yrs?|years?)\b[^)]*\)/i);
     return {
       distance_km: parseFloat(String(c.distance ?? "").replace(/[^\d.]/g, "")) || null,
-      label: stripHtml(c.name),
+      label,
       price_early: early?.price ?? null,
       price_normal: normal?.price ?? prices.at(-1)?.price ?? null,
       price_note: stripHtml(c.text),
       cutoff_time: null,
       flag_off_time: null,
       status: "open",
+      min_age: age ? Number.parseInt(age[1], 10) : null,
+      early_bird_ends: earlyBirdEnds,
     };
   });
 
@@ -61,7 +74,6 @@ export function parseDetail(html, slug, base = BASE) {
     notes: "",
   }));
 
-  const keyDates = (dump.KeyDate ?? []).map((k) => ({ date: k.date, title: stripHtml(k.title) }));
   const racePack = (dump.RacePack ?? []).map((r) => ({
     date: r.date,
     time: r.time,
@@ -78,6 +90,7 @@ export function parseDetail(html, slug, base = BASE) {
     end_date: startDate,
     state: null,
     venue: stripHtml(d.venue) || null,
+    route_map_url: info.route_map || null,
     description: stripHtml(d.description) || null,
     status: statusFromText(info.status) ?? (/available/i.test(info.status ?? "") ? "open" : (info.status ?? null)),
     banner_url: info.main_banner ?? null,

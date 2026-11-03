@@ -44,13 +44,39 @@ export function parseDetail(html, eventId, base = BASE, listStatus = null) {
   };
   const date = toIso(firstLi(/>\s*Event\s*<\/span><\/strong><\/p>[\s\S]{0,300}?<li>([\s\S]*?)<\/li>/));
   const venue = firstLi(/<strong>Venue<\/strong>[\s\S]{0,300}?<li>([\s\S]*?)<\/li>/);
-  // Flag-off list names the distances: "21.1KM Competitive Run: 4:00am".
-  const flagOff = html.match(/Flag-Off Time:[\s\S]*?<ul>([\s\S]*?)<\/ul>/);
+  // The Participation block lists per-distance times:
+  //   "21.1KM Competitive Run: 4:00am" (flag-off) and "21.1KM Competitive Run: 4 hours" (cut-off).
+  const listAfter = (label) => {
+    const m = html.match(new RegExp(`${label}[\\s\\S]{0,200}?<ul>([\\s\\S]*?)<\\/ul>`, "i"));
+    return m ? m[1] : "";
+  };
+  /** "21.1KM Competitive Run: 4:00am" -> Map(21.1 -> "4:00am") */
+  const perDistance = (block) => {
+    const out = new Map();
+    for (const m of block.matchAll(/<li>\s*([\d.]+)\s*KM\b[^<:]*:\s*([^<]+)<\/li>/gi)) {
+      out.set(Number.parseFloat(m[1]), stripHtml(m[2]));
+    }
+    return out;
+  };
+  const flagOffByKm = perDistance(listAfter("Flag-Off Time:"));
+  const cutoffByKm = perDistance(listAfter("Cut-Off Time:"));
+
   const distances = [
-    ...new Set(
-      [...(flagOff?.[1] ?? "").matchAll(/(\d+(?:\.\d+)?)\s*KM/gi)].map((m) => parseFloat(m[1]))
-    ),
+    ...new Set([...flagOffByKm.keys(), ...cutoffByKm.keys()]),
   ].sort((a, b) => a - b);
+
+  // Registration closes: "until" then "8 March 2027 (23:59)".
+  const regClose = html.match(/until[\s\S]{0,400}?<li>\s*([\d]{1,2}\s+[A-Za-z]+\s+\d{4})/i);
+  const registrationDeadline = regClose ? toIso(regClose[1]) : null;
+
+  // The Size Chart section holds the sizing images - essential before paying.
+  const sizeBlock = html.match(/id="Size-Chart"[\s\S]*?<\/div>\s*<\/div>/i);
+  const entitlements = [...(sizeBlock?.[0] ?? "").matchAll(/<img[^>]+src="([^"]+)"/g)].map((m) => ({
+    kind: "size_chart",
+    title: "Size Chart",
+    image_url: m[1].replace(/&amp;/g, "&"),
+    notes: "",
+  }));
 
   return {
     id: `biib-${eventId}`,
@@ -63,17 +89,18 @@ export function parseDetail(html, eventId, base = BASE, listStatus = null) {
     description: stripHtml(longDesc?.[1] ?? description) || null,
     status: listStatus ?? "open",
     banner_url: banner,
+    registration_deadline: registrationDeadline,
     categories: distances.map((km) => ({
       distance_km: km,
       label: `${km}KM`,
       price_early: null,
       price_normal: null,
       price_note: null,
-      cutoff_time: null,
-      flag_off_time: null,
+      cutoff_time: cutoffByKm.get(km) ?? null,
+      flag_off_time: flagOffByKm.get(km) ?? null,
       status: "open",
     })),
-    entitlements: [],
+    entitlements,
     sources: [{ portal: "biib", source_url: `${base}/events/${eventId}` }],
   };
 }

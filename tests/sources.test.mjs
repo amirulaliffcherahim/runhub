@@ -691,3 +691,33 @@ test("every canonical kind is reachable and the list has no duplicates", () => {
   assert.equal(new Set(KINDS).size, KINDS.length);
   for (const k of KINDS) assert.equal(normaliseKind(k), k, `${k} maps to itself`);
 });
+
+test("mergeCategories keeps gender/age variants at the same distance", () => {
+  // RaceXasia really lists two 21km tiers; BiiB lists one generic 21.1KM.
+  const biib = [cat({ distance_km: 21.1, label: "21.1KM Competitive Run", flag_off_time: "4:00am" })];
+  const racexasia = [
+    cat({ distance_km: 21, label: "A: 21km Men Open (17yrs and above)", price_normal: 135 }),
+    cat({ distance_km: 21, label: "C: 21km Veteran Men (40yrs and above)", price_normal: 110 }),
+  ];
+  const out = mergeCategories(biib, racexasia);
+  assert.equal(out.length, 2, "both 21km variants survive");
+  assert.deepEqual(out.map((c) => c.price_normal).sort(), [110, 135], "both price tiers kept");
+
+  // BiiB's single generic 21.1KM tier merges into the first RaceXasia variant and
+  // contributes its flag-off there. The Veteran wave is a *different* category, so
+  // its flag-off is left null rather than guessed from the "Competitive Run" wave.
+  const open = out.find((c) => /Men Open/.test(c.label));
+  const veteran = out.find((c) => /Veteran/.test(c.label));
+  assert.equal(open.flag_off_time, "4:00am");
+  assert.equal(veteran.flag_off_time, null, "not invented");
+});
+
+test("mergeCategories merges two generic tiers at the same distance", () => {
+  const out = mergeCategories(
+    [cat({ distance_km: 10, label: "10km", price_normal: 80 })],
+    [cat({ distance_km: 10.1, label: "10KM Competitive Run", flag_off_time: "6:00am" })]
+  );
+  assert.equal(out.length, 1);
+  assert.equal(out[0].price_normal, 80);
+  assert.equal(out[0].flag_off_time, "6:00am");
+});
